@@ -13,7 +13,6 @@ If any of these files don't exist, **proceed silently**. Don't flag their absenc
 ## File structure
 
 Single-context repo (most repos):
-
 ```
 /
 ├── CONTEXT.md
@@ -24,7 +23,6 @@ Single-context repo (most repos):
 ```
 
 Multi-context repo (presence of `CONTEXT-MAP.md` at the root):
-
 ```
 /
 ├── CONTEXT-MAP.md
