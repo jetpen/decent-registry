@@ -155,13 +155,11 @@ def main(argv: list[str] | None = None) -> None:
     node_p = subparsers.add_parser("node", help="Run a DHT node and optionally bootstrap")
     node_p.add_argument("--host", default="127.0.0.1")
     node_p.add_argument("--port", type=int, required=True)
-    node_p.add_argument("--k", type=int, default=20)
-    node_p.add_argument("--alpha", type=int, default=3)
     node_p.add_argument(
         "--bootstrap",
         action="append",
         default=[],
-        help="TCP seed endpoint(s) like tcp://127.0.0.1:9000; may repeat and/or be comma-separated",
+        help="libp2p seed multiaddr(s), must include /p2p/<peerid> (e.g. /ip4/127.0.0.1/tcp/1234/p2p/<peerid>); may repeat and/or be comma-separated",
     )
     node_p.add_argument(
         "--run-seconds",
@@ -173,13 +171,11 @@ def main(argv: list[str] | None = None) -> None:
     put_p = subparsers.add_parser("put", help="Publish a provider record for an object hash")
     put_p.add_argument("--host", default="127.0.0.1")
     put_p.add_argument("--port", type=int, required=True)
-    put_p.add_argument("--k", type=int, default=20)
-    put_p.add_argument("--alpha", type=int, default=3)
     put_p.add_argument(
         "--bootstrap",
         action="append",
         default=[],
-        help="TCP seed endpoint(s) like tcp://127.0.0.1:9000; may repeat and/or be comma-separated",
+        help="libp2p seed multiaddr(s), must include /p2p/<peerid> (e.g. /ip4/127.0.0.1/tcp/1234/p2p/<peerid>); may repeat and/or be comma-separated",
     )
     put_p.add_argument("--object-hash", dest="object_hash", required=True)
     put_p.add_argument("--provider-id", required=True)
@@ -194,13 +190,11 @@ def main(argv: list[str] | None = None) -> None:
     get_p = subparsers.add_parser("get", help="Resolve an object hash to provider endpoints")
     get_p.add_argument("--host", default="127.0.0.1")
     get_p.add_argument("--port", type=int, required=True)
-    get_p.add_argument("--k", type=int, default=20)
-    get_p.add_argument("--alpha", type=int, default=3)
     get_p.add_argument(
         "--bootstrap",
         action="append",
         default=[],
-        help="TCP seed endpoint(s) like tcp://127.0.0.1:9000; may repeat and/or be comma-separated",
+        help="libp2p seed multiaddr(s), must include /p2p/<peerid> (e.g. /ip4/127.0.0.1/tcp/1234/p2p/<peerid>); may repeat and/or be comma-separated",
     )
     get_p.add_argument("--object-hash", dest="object_hash", required=True)
 
