@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "decent-registry"
+version = "0.1.0"
+description = "A decentralized, eventually consistent DHT-based registry"
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [ { name = "Ben Eng" } ]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["decent_registry*"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+# CLI entry point for node (ticket 06) and later registry (ticket 07)
+decent-registry = "decent_registry.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
