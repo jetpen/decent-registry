@@ -1,5 +1,6 @@
 import json
 import sys
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -144,4 +145,9 @@ class Libp2pKadDHT:
         )
         if raw is None:
             return None
-        return ProviderRecord.from_bytes(raw)
+
+        record = ProviderRecord.from_bytes(raw)
+        expires_at = record.expires_at or 0
+        if expires_at > 0 and time.time() > expires_at:
+            return None
+        return record

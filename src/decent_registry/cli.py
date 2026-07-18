@@ -1,12 +1,13 @@
 import argparse
+import json
 import logging
 import signal
 import sys
-import threading
 import time
 
-from decent_registry.dht.dht import DHTClient
-from decent_registry.dht.protocol import DHTNode
+import trio
+
+from decent_registry.dht.libp2p_dht import Libp2pKadDHT, ProviderRecord
 
 logger = logging.getLogger("decent-registry.cli")
 
@@ -32,109 +33,117 @@ def _parse_endpoints(values: list[str]) -> list[str]:
 
 
 def _node_command(args: argparse.Namespace) -> int:
-    node = DHTNode(args.host, args.port, k=args.k)
-    node.start()
+    async def _async_node() -> int:
+        endpoints = _parse_endpoints(args.bootstrap or [])
+        listen = f"/ip4/{args.host}/tcp/{args.port}"
 
-    logger.info("Node %s listening on tcp://%s:%d", node.node_id, args.host, args.port)
+        async with Libp2pKadDHT(listen=listen) as dht:
+            node_peer_id = dht.host.get_id().to_string()
+            logger.info("Node %s listening on %s", node_peer_id, dht.get_listen_multiaddr())
 
-    client = DHTClient(node, alpha=args.alpha)
-    endpoints = _parse_endpoints(args.bootstrap or [])
+            ok = True
+            if endpoints:
+                ok_any = False
+                for seed in endpoints:
+                    try:
+                        await dht.bootstrap(seed)
+                        ok_any = True
+                    except Exception as e:
+                        logger.warning("Bootstrap seed failed: %s (%s)", seed, e)
+                ok = ok_any
 
-    ok = True
-    if endpoints:
-        ok = client.bootstrap(endpoints)
-        if ok:
-            logger.info("Bootstrap succeeded (seed count=%d)", len(endpoints))
-        else:
-            logger.warning("Bootstrap failed (seed count=%d)", len(endpoints))
+            if args.run_seconds is not None:
+                await trio.sleep(args.run_seconds)
+                return 0 if ok else 1
 
-    if args.run_seconds is not None:
-        # bounded run for smoke testing
-        time.sleep(args.run_seconds)
-        node.stop()
-        return 0 if ok else 1
+            with trio.open_signal_receiver(signal.SIGINT, signal.SIGTERM) as signals:
+                async for _ in signals:
+                    break
 
-    stop_event = threading.Event()
+            return 0 if ok else 1
 
-    def _stop_handler(signum, frame):
-        node.stop()
-        stop_event.set()
-
-    signal.signal(signal.SIGINT, _stop_handler)
-    signal.signal(signal.SIGTERM, _stop_handler)
-
-    try:
-        stop_event.wait()
-    finally:
-        node.stop()
-
-    return 0 if ok else 1
+    return trio.run(_async_node)
 
 
 def _put_command(args: argparse.Namespace) -> int:
-    node = DHTNode(args.host, args.port, k=args.k)
-    node.start()
-    try:
-        client = DHTClient(node, alpha=args.alpha)
+    async def _async_put() -> int:
         endpoints = _parse_endpoints(args.endpoint or [])
         seeds = _parse_endpoints(args.bootstrap or [])
 
-        if seeds:
-            ok = client.bootstrap(seeds)
-            if not ok:
-                return 1
+        listen = f"/ip4/{args.host}/tcp/{args.port}"
+        async with Libp2pKadDHT(listen=listen) as dht:
+            for seed in seeds:
+                # seed must be an identify-style multiaddr with /p2p/<peerid>
+                await dht.bootstrap(seed)
 
-        now = int(time.time())
-        ttl_seconds = int(args.ttl_seconds)
-        expires_at = now + ttl_seconds
+            # routing convergence (minimal)
+            await trio.sleep(1.0)
 
-        record = {
-            "version": 1,
-            "object_hash": args.object_hash,
-            "ttl_seconds": ttl_seconds,
-            "expires_at": expires_at,
-            "providers": [
-                {
-                    "provider_id": args.provider_id,
-                    "endpoints": endpoints,
-                    "last_seen": now,
-                }
-            ],
-        }
+            now = int(time.time())
+            ttl_seconds = int(args.ttl_seconds)
+            expires_at = now + ttl_seconds
 
-        stored = client.store_value(args.object_hash, record)
-        if stored <= 0:
-            return 1
+            record = {
+                "version": 1,
+                "object_hash": args.object_hash,
+                "ttl_seconds": ttl_seconds,
+                "expires_at": expires_at,
+                "providers": [
+                    {
+                        "provider_id": args.provider_id,
+                        "endpoints": endpoints,
+                        "last_seen": now,
+                    }
+                ],
+            }
 
-        # minimal machine-readable output
-        print(stored)
-        return 0
-    finally:
-        node.stop()
+            await dht.put_provider_record(
+                ProviderRecord(
+                    object_hash=args.object_hash,
+                    version=1,
+                    ttl_seconds=ttl_seconds,
+                    expires_at=expires_at,
+                    providers=record["providers"],
+                )
+            )
+
+            # minimal machine-readable output (kept for compatibility)
+            print(1)
+            return 0
+
+    return trio.run(_async_put)
 
 
 def _get_command(args: argparse.Namespace) -> int:
-    node = DHTNode(args.host, args.port, k=args.k)
-    node.start()
-    try:
-        client = DHTClient(node, alpha=args.alpha)
+    async def _async_get() -> int:
         seeds = _parse_endpoints(args.bootstrap or [])
-        if seeds:
-            ok = client.bootstrap(seeds)
-            if not ok:
+
+        listen = f"/ip4/{args.host}/tcp/{args.port}"
+        async with Libp2pKadDHT(listen=listen) as dht:
+            for seed in seeds:
+                await dht.bootstrap(seed)
+
+            # minimal routing settle
+            await trio.sleep(1.0)
+
+            record = await dht.get_provider_record(args.object_hash)
+            if record is None:
+                print("not found")
                 return 1
 
-        found_record, closer_nodes = client.iterative_find_value(args.object_hash)
-        if found_record is None:
-            print("not found")
-            return 1
+            import json
 
-        import json
+            payload = {
+                "version": record.version,
+                "object_hash": record.object_hash,
+                "ttl_seconds": record.ttl_seconds,
+                "expires_at": record.expires_at,
+                "providers": record.providers,
+            }
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 0
 
-        print(json.dumps(found_record, indent=2, sort_keys=True))
-        return 0
-    finally:
-        node.stop()
+    return trio.run(_async_get)
 
 
 def main(argv: list[str] | None = None) -> None:
