@@ -20,7 +20,7 @@ where = ["src"]
 include = ["decent_registry*"]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "pytest-trio>=0.8"]
 
 [project.scripts]
 # CLI entry point for node (ticket 06) and later registry (ticket 07)
