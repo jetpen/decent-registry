@@ -15,6 +15,8 @@
 
 Next: none — tickets 05–08 are complete (packaging, node CLI, registry CLI, and CLI put/get end-to-end verification).
 
+- Cleanup: removed duplicate prototype source under `.scratch/sha256-distributed-hash-table/src/`; canonical implementation lives under `src/decent_registry/dht/`.
+
 - Ticket 05 update: prototype packaged as `decent_registry.dht.*` importable modules; `pytest` passes (3 tests).
 - Ticket 06 update: implemented `decent-registry node` CLI with `--bootstrap` and bounded `--run-seconds` mode; bootstrap failure exit code verified; `PING`/`PONG` validated. Full `pytest -q` passes (5 tests).
 - Ticket 07 update: implemented `decent-registry put`/`get` registry CLI; unit+subprocess tests verify put→get and TTL expiry (now `7 passed`).
