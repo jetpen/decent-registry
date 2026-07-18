@@ -7,7 +7,7 @@ name = "decent-registry"
 version = "0.1.0"
 description = "A decentralized, eventually consistent DHT-based registry"
 requires-python = ">=3.11"
-dependencies = ["kademlia>=2.2.3"]
+dependencies = ["libp2p>=0.7.0"]
 readme = "README.md"
 license = { text = "MIT" }
 authors = [ { name = "Ben Eng" } ]
