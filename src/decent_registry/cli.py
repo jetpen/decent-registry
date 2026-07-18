@@ -2,7 +2,6 @@ import argparse
 import json
 import logging
 import signal
-import sys
 import time
 
 import trio
