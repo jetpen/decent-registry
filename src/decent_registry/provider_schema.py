@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 import cbor2
 
@@ -63,6 +63,60 @@ _FIELD_PROVIDER_ID = 4
 _FIELD_ENDPOINTS = 5
 
 
+def build_provider_payload_dict(
+    *,
+    alg: str,
+    version: int,
+    object_hash: str,
+    provider_id: str,
+    endpoints: list[str],
+) -> dict[int, Any]:
+    """Build the in-memory payload dict for the provider signed-field list."""
+
+    if not isinstance(version, int) or version < 0:
+        raise TypeError("version must be a non-negative int")
+
+    norm_eps = normalize_sorted_endpoints(endpoints)
+
+    return {
+        _FIELD_ALG: alg,
+        _FIELD_VERSION: int(version),
+        _FIELD_OBJECT_HASH: object_hash,
+        _FIELD_PROVIDER_ID: provider_id,
+        _FIELD_ENDPOINTS: norm_eps,
+    }
+
+
+def decode_provider_payload_dict(payload: Mapping[int, Any]) -> ProviderPayloadV1:
+    if not isinstance(payload, Mapping):
+        raise TypeError("payload must be a mapping")
+
+    keys = set(payload.keys())
+    if keys != _PROVIDER_PAYLOAD_FIELDS:
+        missing = _PROVIDER_PAYLOAD_FIELDS - keys
+        extra = keys - _PROVIDER_PAYLOAD_FIELDS
+        raise ValueError(
+            f"provider payload keys mismatch; missing={missing} extra={extra}"
+        )
+
+    endpoints = payload[_FIELD_ENDPOINTS]
+    if not isinstance(endpoints, list) or not all(
+        isinstance(x, str) for x in endpoints
+    ):
+        raise ValueError("endpoints must be list[str]")
+
+    endpoints = _validate_endpoints(endpoints)
+    _require_endpoints_sorted(endpoints)
+
+    return ProviderPayloadV1(
+        alg=str(payload[_FIELD_ALG]),
+        version=int(payload[_FIELD_VERSION]),
+        object_hash=str(payload[_FIELD_OBJECT_HASH]),
+        provider_id=str(payload[_FIELD_PROVIDER_ID]),
+        endpoints=endpoints,
+    )
+
+
 def encode_provider_payload(
     *,
     alg: str,
@@ -71,19 +125,16 @@ def encode_provider_payload(
     provider_id: str,
     endpoints: list[str],
 ) -> bytes:
-    if not isinstance(version, int) or version < 0:
-        raise TypeError("version must be a non-negative int")
+    """Canonical CBOR encode of the provider signed-field list payload."""
 
-    norm_eps = normalize_sorted_endpoints(endpoints)
-
-    payload = {
-        _FIELD_ALG: alg,
-        _FIELD_VERSION: int(version),
-        _FIELD_OBJECT_HASH: object_hash,
-        _FIELD_PROVIDER_ID: provider_id,
-        _FIELD_ENDPOINTS: norm_eps,
-    }
-    return canonical_cbor(payload)
+    payload_dict = build_provider_payload_dict(
+        alg=alg,
+        version=version,
+        object_hash=object_hash,
+        provider_id=provider_id,
+        endpoints=endpoints,
+    )
+    return canonical_cbor(payload_dict)
 
 
 def decode_provider_payload(data: bytes) -> ProviderPayloadV1:
@@ -100,30 +151,7 @@ def decode_provider_payload(data: bytes) -> ProviderPayloadV1:
     if not isinstance(decoded, dict):
         raise ValueError("provider payload must be a CBOR map")
 
-    keys = set(decoded.keys())
-    if keys != _PROVIDER_PAYLOAD_FIELDS:
-        missing = _PROVIDER_PAYLOAD_FIELDS - keys
-        extra = keys - _PROVIDER_PAYLOAD_FIELDS
-        raise ValueError(
-            f"provider payload keys mismatch; missing={missing} extra={extra}"
-        )
-
-    endpoints = decoded.get(_FIELD_ENDPOINTS)
-    if not isinstance(endpoints, list) or not all(
-        isinstance(x, str) for x in endpoints
-    ):
-        raise ValueError("endpoints must be list[str]")
-
-    endpoints = _validate_endpoints(endpoints)
-    _require_endpoints_sorted(endpoints)
-
-    return ProviderPayloadV1(
-        alg=str(decoded[_FIELD_ALG]),
-        version=int(decoded[_FIELD_VERSION]),
-        object_hash=str(decoded[_FIELD_OBJECT_HASH]),
-        provider_id=str(decoded[_FIELD_PROVIDER_ID]),
-        endpoints=endpoints,
-    )
+    return decode_provider_payload_dict(decoded)
 
 
 def format_get_result(*, object_key: str, endpoints: list[str]) -> dict[str, Any]:
