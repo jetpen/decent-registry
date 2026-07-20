@@ -9,6 +9,7 @@ import time
 
 import pytest
 import trio
+import shutil
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import (
@@ -415,6 +416,83 @@ def test_cli_keygen_custom_output(tmp_path):
 
     _, owner_pub_bytes = _load_ed25519_keypair_from_privkey_pem_path(str(out_path))
     assert len(owner_pub_bytes) == 32
+
+
+def test_cli_keygen_pem_openssl_compatibility(tmp_path):
+    if shutil.which("openssl") is None:
+        pytest.skip("openssl not installed")
+
+    pem_path = tmp_path / "openssl-owner_privkey.pem"
+    res = _run_cli(["keygen", "--output", str(pem_path)])
+    assert res.returncode == 0, f"keygen failed: {res.stdout} {res.stderr}"
+    assert pem_path.exists()
+
+    pub_pem_path = tmp_path / "openssl-owner_pubkey.pem"
+    # Extract public key with OpenSSL. Should succeed for generated Ed25519 PEM.
+    pub_res = subprocess.run(
+        [
+            "openssl",
+            "pkey",
+            "-in",
+            str(pem_path),
+            "-pubout",
+            "-out",
+            str(pub_pem_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert pub_res.returncode == 0, f"openssl pkey -pubout failed: {pub_res.stdout} {pub_res.stderr}"
+    assert pub_pem_path.exists()
+    pub_text = pub_pem_path.read_text(encoding="utf-8")
+    assert "BEGIN PUBLIC KEY" in pub_text
+
+    # Sign and verify with OpenSSL to validate end-to-end compatibility.
+    msg_path = tmp_path / "msg.bin"
+    msg_path.write_bytes(b"decent-registry openssl compatibility test")
+    sig_path = tmp_path / "sig.bin"
+
+    sign_res = subprocess.run(
+        [
+            "openssl",
+            "pkeyutl",
+            "-sign",
+            "-inkey",
+            str(pem_path),
+            "-rawin",
+            "-in",
+            str(msg_path),
+            "-out",
+            str(sig_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert sign_res.returncode == 0, f"openssl pkeyutl -sign failed: {sign_res.stdout} {sign_res.stderr}"
+    assert sig_path.exists() and sig_path.stat().st_size > 0
+
+    verify_res = subprocess.run(
+        [
+            "openssl",
+            "pkeyutl",
+            "-verify",
+            "-pubin",
+            "-inkey",
+            str(pub_pem_path),
+            "-rawin",
+            "-in",
+            str(msg_path),
+            "-sigfile",
+            str(sig_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert verify_res.returncode == 0, f"openssl pkeyutl -verify failed: {verify_res.stdout} {verify_res.stderr}"
+    assert "Signature Verified" in verify_res.stdout or "Signature Verified" in verify_res.stderr
 
 
 def test_load_ed25519_keypair_from_pem_valid(tmp_path):
