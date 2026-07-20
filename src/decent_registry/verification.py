@@ -25,7 +25,7 @@ def _sha256(data: bytes) -> bytes:
 
 
 def _pubkey_from_bytes(raw: bytes) -> Any:
-    return _PUBKEY_CLS.from_bytes(raw)
+    return _PUBKEY_CLS.from_bytes(raw)  # type: ignore[attr-defined]
 
 
 def verify_ed25519_signature(

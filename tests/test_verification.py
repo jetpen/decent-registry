@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 
 import cbor2
+from typing import Any
 import pytest
 
 from libp2p.crypto.ed25519 import create_new_key_pair
@@ -27,7 +28,7 @@ def _keypair():
 
 def _identity_update(*, owner_name: bytes, owner_pubkey: bytes, seq: int):
     record_fields = {1: owner_name, 2: owner_pubkey}
-    payload = {}
+    payload: dict[int, Any] = {}
     signed_update_bytes = encode_signed_update(
         record_fields=record_fields,
         payload=payload,
@@ -36,9 +37,15 @@ def _identity_update(*, owner_name: bytes, owner_pubkey: bytes, seq: int):
     return signed_update_bytes
 
 
-def _provider_update(*, owner_pubkey: bytes, object_hash_hex: str, payload_dict, seq: int):
+def _provider_update(
+    *,
+    owner_pubkey: bytes,
+    object_hash_hex: str,
+    payload_dict: dict[int, Any],
+    seq: int,
+):
     record_fields = {1: owner_pubkey}
-    payload = payload_dict
+    payload: dict[int, Any] = payload_dict
     signed_update_bytes = encode_signed_update(
         record_fields=record_fields,
         payload=payload,
