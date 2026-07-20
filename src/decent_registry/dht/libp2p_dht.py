@@ -12,7 +12,7 @@ from libp2p.kad_dht.kad_dht import KadDHT, DHTMode
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.tools.anyio_service.context import background_trio_service
 
-from decent_registry.durable_store import LMDBDatastore
+from decent_registry.storage_backend import StorageBackend
 from decent_registry.provider_schema import ProviderPayloadV1
 from decent_registry.record_validator import RecordValidator
 
@@ -64,7 +64,7 @@ class Libp2pKadDHT:
         self,
         listen: str = "/ip4/127.0.0.1/tcp/0",
         *,
-        durable_store: LMDBDatastore | None = None,
+        durable_store: StorageBackend | None = None,
     ):
         self._key_pair = create_new_key_pair()
         self._listen = Multiaddr(listen)
