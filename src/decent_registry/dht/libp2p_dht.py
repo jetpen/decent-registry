@@ -13,6 +13,7 @@ from libp2p.kad_dht.kad_dht import KadDHT, DHTMode
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.tools.anyio_service.context import background_trio_service
 
+from decent_registry.durable_store import LMDBDatastore
 from decent_registry.encoding import decode_canonical_signed_update
 from decent_registry.provider_schema import ProviderPayloadV1, decode_provider_payload_dict
 from decent_registry.signed_envelope import decode_signed_envelope
@@ -62,10 +63,17 @@ class Libp2pKadDHT:
     async methods usable with pytest-trio.
     """
 
-    def __init__(self, listen: str = "/ip4/127.0.0.1/tcp/0"):
+    def __init__(
+        self,
+        listen: str = "/ip4/127.0.0.1/tcp/0",
+        *,
+        durable_store: LMDBDatastore | None = None,
+    ):
         self._key_pair = create_new_key_pair()
         self._listen = Multiaddr(listen)
         self._host = new_host(key_pair=self._key_pair, enable_tcp=True)
+
+        self._durable_store = durable_store
 
         self._host_ctx: Any | None = None
         self._dht_ctx: Any | None = None
@@ -81,11 +89,16 @@ class Libp2pKadDHT:
         return self._dht
 
     async def __aenter__(self) -> "Libp2pKadDHT":
+        if self._durable_store is not None:
+            self._durable_store.open()
+
         self._host_ctx = self._host.run(listen_addrs=[self._listen])
         try:
             await self._host_ctx.__aenter__()
         except Exception:
             self._host_ctx = None
+            if self._durable_store is not None:
+                self._durable_store.close()
             raise
 
         # Construct Kad-DHT once the swarm is running
@@ -104,6 +117,8 @@ class Libp2pKadDHT:
                 await self._host_ctx.__aexit__(*sys.exc_info())
             self._dht_ctx = None
             self._host_ctx = None
+            if self._durable_store is not None:
+                self._durable_store.close()
             raise
 
         return self
@@ -113,6 +128,9 @@ class Libp2pKadDHT:
             await self._dht_ctx.__aexit__(exc_type, exc, tb)
         if self._host_ctx is not None:
             await self._host_ctx.__aexit__(exc_type, exc, tb)
+
+        if self._durable_store is not None:
+            self._durable_store.close()
 
     def get_listen_multiaddr(self) -> str:
         addrs = [str(a) for a in self._host.get_addrs()]
@@ -138,16 +156,12 @@ class Libp2pKadDHT:
         return f"/decent-registry/{kind}/{object_hash}"
 
     async def put_provider_record(self, record: ProviderRecord) -> None:
-        assert self._dht is not None
         await self._dht.put_value(self._kad_key(record.object_hash), record.to_bytes())
 
     async def get_provider_record(
         self, object_hash: str, quorum: int = 0
     ) -> ProviderRecord | None:
-        assert self._dht is not None
-        raw = await self._dht.get_value(
-            self._kad_key(object_hash), quorum=quorum
-        )
+        raw = await self._dht.get_value(self._kad_key(object_hash), quorum=quorum)
         if raw is None:
             return None
 
@@ -165,17 +179,10 @@ class Libp2pKadDHT:
         Input envelope format is defined in `src/decent_registry/signed_envelope.py`.
         """
 
-        assert self._dht is not None
-
         record_key = bytes.fromhex(object_hash)
         kad_key = self._kad_key(object_hash)
 
         # Derive previous seq/owner from the stored envelope (if any).
-        #
-        # The overwrite check needs the previous owner's concrete Ed25519 public key
-        # for the *record kind* (provider vs identity). The signed update verifier
-        # can derive the right owner binding, but this DHT adapter has to seed
-        # seq monotonicity with the previous owner.
         prev: SeqStateEntry | None = None
         raw_existing = await self._dht.get_value(kad_key, quorum=0)
         if raw_existing is not None:
@@ -189,16 +196,8 @@ class Libp2pKadDHT:
                 seq = existing_signed_update[3]
                 record_fields = existing_signed_update[1]
 
-                # Identity record: record_fields[1]=owner_name bytes, record_fields[2]=owner_public_key bytes.
-                if (
-                    isinstance(record_fields, dict)
-                    and 1 in record_fields
-                    and 2 in record_fields
-                    and isinstance(record_fields[2], (bytes, bytearray))
-                ):
-                    owner_public_key = bytes(record_fields[2])
                 # Provider record: record_fields[1]=owner_public_key bytes.
-                elif (
+                if (
                     isinstance(record_fields, dict)
                     and 1 in record_fields
                     and isinstance(record_fields[1], (bytes, bytearray))
@@ -229,11 +228,15 @@ class Libp2pKadDHT:
 
         await self._dht.put_value(kad_key, envelope_cbor)
 
+        if self._durable_store is not None:
+            self._durable_store.put(
+                kind="provider", key=record_key, value=envelope_cbor
+            )
+
     async def put_signed_identity_record(
         self, object_key_hex: str, envelope_cbor: bytes
     ) -> None:
         """Store a CBOR signed identity update under the identity namespace."""
-        assert self._dht is not None
 
         record_key = bytes.fromhex(object_key_hex)
         kad_key = self._kad_key(object_key_hex, kind="identity")
@@ -253,7 +256,7 @@ class Libp2pKadDHT:
                 seq = existing_signed_update[3]
                 record_fields = existing_signed_update[1]
 
-                # Identity record: record_fields[1]=owner_name bytes, record_fields[2]=owner_public_key bytes.
+                # Identity record: record_fields[2]=owner_public_key bytes.
                 if (
                     isinstance(record_fields, dict)
                     and 2 in record_fields
@@ -285,69 +288,119 @@ class Libp2pKadDHT:
 
         await self._dht.put_value(kad_key, envelope_cbor)
 
+        if self._durable_store is not None:
+            self._durable_store.put(
+                kind="identity", key=record_key, value=envelope_cbor
+            )
+
     async def get_signed_identity_record(
         self, object_key_hex: str, quorum: int = 0
     ) -> dict[str, Any] | None:
-        """Retrieve and verify an identity record under the DHT key."""
-        assert self._dht is not None
+        """Retrieve and verify an identity record under the DHT key.
+
+        Preference order:
+        1) DHT (freshness)
+        2) durable_store cache (durability)
+        """
 
         record_key = bytes.fromhex(object_key_hex)
         kad_key = self._kad_key(object_key_hex, kind="identity")
-        raw = await self._dht.get_value(kad_key, quorum=quorum)
-        if raw is None:
-            return None
 
+        def _decode_and_build(raw: bytes) -> dict[str, Any] | None:
+            try:
+                signed_update_bytes, signature = decode_signed_envelope(raw)
+                validate_signed_update_overwrite(
+                    record_key=record_key,
+                    signed_update_bytes_canonical=signed_update_bytes,
+                    signature=signature,
+                    seq_state={},
+                    update_state_on_success=False,
+                )
+
+                signed_update = decode_canonical_signed_update(signed_update_bytes)
+                record_fields = signed_update[1]
+                seq = signed_update[3]
+
+                owner_name_bytes = record_fields.get(1)
+                owner_pub_bytes = record_fields.get(2)
+                if not isinstance(owner_name_bytes, (bytes, bytearray)):
+                    return None
+                if not isinstance(owner_pub_bytes, (bytes, bytearray)):
+                    return None
+
+                return {
+                    "object_key": object_key_hex,
+                    "owner_name": bytes(owner_name_bytes).hex(),
+                    "owner_public_key": bytes(owner_pub_bytes).hex(),
+                    "seq": int(seq),
+                }
+            except Exception:
+                return None
+
+        # 1) Try DHT first
         try:
-            signed_update_bytes, signature = decode_signed_envelope(raw)
-            validate_signed_update_overwrite(
-                record_key=record_key,
-                signed_update_bytes_canonical=signed_update_bytes,
-                signature=signature,
-                seq_state={},
-                update_state_on_success=False,
-            )
-
-            signed_update = decode_canonical_signed_update(signed_update_bytes)
-            record_fields = signed_update[1]
-            seq = signed_update[3]
-
-            owner_name_bytes = record_fields.get(1)
-            owner_pub_bytes = record_fields.get(2)
-            if not isinstance(owner_name_bytes, (bytes, bytearray)):
-                return None
-            if not isinstance(owner_pub_bytes, (bytes, bytearray)):
-                return None
-
-            return {
-                "object_key": object_key_hex,
-                "owner_name": bytes(owner_name_bytes).hex(),
-                "owner_public_key": bytes(owner_pub_bytes).hex(),
-                "seq": int(seq),
-            }
+            raw_dht = await self._dht.get_value(kad_key, quorum=quorum)
         except Exception:
+            raw_dht = None
+
+        if raw_dht is not None:
+            if self._durable_store is not None:
+                self._durable_store.put(
+                    kind="identity", key=record_key, value=raw_dht
+                )
+            return _decode_and_build(raw_dht)
+
+        # 2) Fallback local cache
+        if self._durable_store is None:
             return None
+
+        raw_local = self._durable_store.get(kind="identity", key=record_key)
+        if raw_local is None:
+            return None
+        return _decode_and_build(raw_local)
 
     async def get_signed_provider_record(
         self, object_hash: str, quorum: int = 0
     ) -> ProviderPayloadV1 | None:
-        assert self._dht is not None
-
         record_key = bytes.fromhex(object_hash)
         kad_key = self._kad_key(object_hash)
-        raw = await self._dht.get_value(kad_key, quorum=quorum)
-        if raw is None:
+
+        def _decode_and_build(raw: bytes) -> ProviderPayloadV1 | None:
+            try:
+                signed_update_bytes, signature = decode_signed_envelope(raw)
+                # Verify only; seq monotonicity is guaranteed by storage-side overwrite.
+                validate_signed_update_overwrite(
+                    record_key=record_key,
+                    signed_update_bytes_canonical=signed_update_bytes,
+                    signature=signature,
+                    seq_state={},
+                    update_state_on_success=False,
+                )
+
+                signed_update = decode_canonical_signed_update(signed_update_bytes)
+                payload_map = signed_update[2]
+                return decode_provider_payload_dict(payload_map)
+            except Exception:
+                return None
+
+        # 1) Try DHT first
+        try:
+            raw_dht = await self._dht.get_value(kad_key, quorum=quorum)
+        except Exception:
+            raw_dht = None
+
+        if raw_dht is not None:
+            if self._durable_store is not None:
+                self._durable_store.put(
+                    kind="provider", key=record_key, value=raw_dht
+                )
+            return _decode_and_build(raw_dht)
+
+        # 2) Fallback local cache
+        if self._durable_store is None:
             return None
 
-        signed_update_bytes, signature = decode_signed_envelope(raw)
-        # Verify only; seq monotonicity is guaranteed by storage-side overwrite.
-        validate_signed_update_overwrite(
-            record_key=record_key,
-            signed_update_bytes_canonical=signed_update_bytes,
-            signature=signature,
-            seq_state={},
-            update_state_on_success=False,
-        )
-
-        signed_update = decode_canonical_signed_update(signed_update_bytes)
-        payload_map = signed_update[2]
-        return decode_provider_payload_dict(payload_map)
+        raw_local = self._durable_store.get(kind="provider", key=record_key)
+        if raw_local is None:
+            return None
+        return _decode_and_build(raw_local)

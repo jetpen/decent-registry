@@ -97,3 +97,7 @@ env/
 
 # PyCharm settings
 .idea/
+
+# Local LMDB scratch datastores
+.scratch/*.lmdb*
+
