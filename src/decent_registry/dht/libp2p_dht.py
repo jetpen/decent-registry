@@ -13,6 +13,11 @@ from libp2p.kad_dht.kad_dht import KadDHT, DHTMode
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.tools.anyio_service.context import background_trio_service
 
+from decent_registry.encoding import decode_canonical_signed_update
+from decent_registry.provider_schema import ProviderPayloadV1, decode_provider_payload_dict
+from decent_registry.signed_envelope import decode_signed_envelope
+from decent_registry.verification import SeqStateEntry, validate_signed_update_overwrite
+
 
 @dataclass
 class ProviderRecord:
@@ -151,3 +156,78 @@ class Libp2pKadDHT:
         if expires_at > 0 and time.time() > expires_at:
             return None
         return record
+
+    async def put_signed_provider_record(
+        self, object_hash: str, envelope_cbor: bytes
+    ) -> None:
+        """Store a CBOR signed provider update, enforcing seq monotonic overwrite.
+
+        Input envelope format is defined in `src/decent_registry/signed_envelope.py`.
+        """
+
+        assert self._dht is not None
+
+        record_key = bytes.fromhex(object_hash)
+        kad_key = self._kad_key(object_hash)
+
+        # Derive previous seq/owner from the stored envelope (if any).
+        prev: SeqStateEntry | None = None
+        raw_existing = await self._dht.get_value(kad_key, quorum=0)
+        if raw_existing is not None:
+            try:
+                existing_signed_update_bytes, _existing_signature = decode_signed_envelope(
+                    raw_existing
+                )
+                existing_signed_update = decode_canonical_signed_update(
+                    existing_signed_update_bytes
+                )
+                seq = existing_signed_update[3]
+                record_fields = existing_signed_update[1]
+                # Provider record: record_fields[1] = owner_public_key bytes.
+                owner_public_key = bytes(record_fields[1])
+                prev = SeqStateEntry(
+                    owner_public_key=owner_public_key,
+                    seq=int(seq),
+                )
+            except Exception:
+                prev = None
+
+        seq_state: dict[bytes, SeqStateEntry] = {}
+        if prev is not None:
+            seq_state[record_key] = prev
+
+        signed_update_bytes, signature = decode_signed_envelope(envelope_cbor)
+        validate_signed_update_overwrite(
+            record_key=record_key,
+            signed_update_bytes_canonical=signed_update_bytes,
+            signature=signature,
+            seq_state=seq_state,
+            update_state_on_success=False,
+        )
+
+        await self._dht.put_value(kad_key, envelope_cbor)
+
+    async def get_signed_provider_record(
+        self, object_hash: str, quorum: int = 0
+    ) -> ProviderPayloadV1 | None:
+        assert self._dht is not None
+
+        record_key = bytes.fromhex(object_hash)
+        kad_key = self._kad_key(object_hash)
+        raw = await self._dht.get_value(kad_key, quorum=quorum)
+        if raw is None:
+            return None
+
+        signed_update_bytes, signature = decode_signed_envelope(raw)
+        # Verify only; seq monotonicity is guaranteed by storage-side overwrite.
+        validate_signed_update_overwrite(
+            record_key=record_key,
+            signed_update_bytes_canonical=signed_update_bytes,
+            signature=signature,
+            seq_state={},
+            update_state_on_success=False,
+        )
+
+        signed_update = decode_canonical_signed_update(signed_update_bytes)
+        payload_map = signed_update[2]
+        return decode_provider_payload_dict(payload_map)

@@ -6,9 +6,11 @@ import subprocess
 import threading
 import time
 
+import pytest
 import trio
 
 from decent_registry.dht.libp2p_dht import Libp2pKadDHT
+from libp2p.crypto.ed25519 import create_new_key_pair
 
 
 def _free_port() -> int:
@@ -54,14 +56,19 @@ def _start_libp2p_seed(seed_port: int, alive_seconds: float = 15.0):
     return t, bootstrap
 
 
+def _normalize_endpoints(endpoints: list[str]) -> list[str]:
+    return sorted(endpoints)
+
+
 def test_cli_put_get_round_trip_libp2p_kad_dht():
-    # Start seed node inside the test process (trio runtime in a background thread)
     seed_port = _free_port()
     _, seed_bootstrap = _start_libp2p_seed(seed_port, alive_seconds=12.0)
 
     obj = "f" * 64
     provider_id = "a" * 64
-    endpoints = ["tcp://127.0.0.1:9999"]
+    owner_priv_hex = create_new_key_pair().private_key.to_bytes().hex()
+
+    endpoints = ["/ip4/127.0.0.1/tcp/9999"]
 
     put_res = _run_cli(
         [
@@ -76,8 +83,10 @@ def test_cli_put_get_round_trip_libp2p_kad_dht():
             obj,
             "--provider-id",
             provider_id,
-            "--ttl-seconds",
-            "10",
+            "--owner-privkey",
+            owner_priv_hex,
+            "--seq",
+            "1",
             "--endpoint",
             ",".join(endpoints),
         ]
@@ -100,20 +109,24 @@ def test_cli_put_get_round_trip_libp2p_kad_dht():
     assert get_res.returncode == 0, f"get failed: {get_res.stdout} {get_res.stderr}"
 
     record = json.loads(get_res.stdout)
-    assert record["object_hash"] == obj
-    assert record["providers"][0]["provider_id"] == provider_id
-    assert record["providers"][0]["endpoints"] == endpoints
+    assert record["object_key"] == obj
+    assert record["provider_id"] == provider_id
+    assert record["endpoints"] == _normalize_endpoints(endpoints)
 
 
-def test_cli_get_expired_returns_not_found_libp2p_kad_dht():
+def test_cli_seq_monotonic_overwrite_libp2p_kad_dht():
     seed_port = _free_port()
-    _, seed_bootstrap = _start_libp2p_seed(seed_port, alive_seconds=25.0)
+    _, seed_bootstrap = _start_libp2p_seed(seed_port, alive_seconds=20.0)
 
     obj = "e" * 64
     provider_id = "b" * 64
-    endpoints = ["tcp://127.0.0.1:8888"]
+    owner_priv_hex = create_new_key_pair().private_key.to_bytes().hex()
 
-    put_res = _run_cli(
+    endpoints_1 = ["/ip4/127.0.0.1/tcp/10001"]
+    endpoints_2 = ["/ip4/127.0.0.1/tcp/10002"]
+    endpoints_3 = ["/ip4/127.0.0.1/tcp/10003"]
+
+    put1 = _run_cli(
         [
             "put",
             "--host",
@@ -126,41 +139,64 @@ def test_cli_get_expired_returns_not_found_libp2p_kad_dht():
             obj,
             "--provider-id",
             provider_id,
-            "--ttl-seconds",
-            "5",
+            "--owner-privkey",
+            owner_priv_hex,
+            "--seq",
+            "1",
             "--endpoint",
-            ",".join(endpoints),
+            ",".join(endpoints_1),
         ]
     )
-    assert put_res.returncode == 0, f"put failed: {put_res.stdout} {put_res.stderr}"
+    assert put1.returncode == 0, f"put1 failed: {put1.stdout} {put1.stderr}"
 
-    # Ensure the record appears before waiting for expiry.
-    found = False
-    for _ in range(25):
-        time.sleep(0.4)
-        get_res = _run_cli(
-            [
-                "get",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                str(_free_port()),
-                "--bootstrap",
-                seed_bootstrap,
-                "--object-hash",
-                obj,
-            ]
-        )
-        if get_res.returncode == 0:
-            found = True
-            break
+    put2 = _run_cli(
+        [
+            "put",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(_free_port()),
+            "--bootstrap",
+            seed_bootstrap,
+            "--object-hash",
+            obj,
+            "--provider-id",
+            provider_id,
+            "--owner-privkey",
+            owner_priv_hex,
+            "--seq",
+            "2",
+            "--endpoint",
+            ",".join(endpoints_2),
+        ]
+    )
+    assert put2.returncode == 0, f"put2 failed: {put2.stdout} {put2.stderr}"
 
-    assert found, f"record never appeared before expiry: {get_res.stdout}"
+    # Attempt overwrite with lower seq; should be rejected.
+    put3 = _run_cli(
+        [
+            "put",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(_free_port()),
+            "--bootstrap",
+            seed_bootstrap,
+            "--object-hash",
+            obj,
+            "--provider-id",
+            provider_id,
+            "--owner-privkey",
+            owner_priv_hex,
+            "--seq",
+            "1",
+            "--endpoint",
+            ",".join(endpoints_3),
+        ]
+    )
+    assert put3.returncode != 0, "expected lower-seq overwrite to fail"
 
-    # TTL=5; wait for expiry.
-    time.sleep(6.5)
-
-    get_res2 = _run_cli(
+    get_res = _run_cli(
         [
             "get",
             "--host",
@@ -173,5 +209,9 @@ def test_cli_get_expired_returns_not_found_libp2p_kad_dht():
             obj,
         ]
     )
-    assert get_res2.returncode == 1
-    assert "not found" in get_res2.stdout.lower()
+    assert get_res.returncode == 0, f"get failed: {get_res.stdout} {get_res.stderr}"
+
+    record = json.loads(get_res.stdout)
+    assert record["object_key"] == obj
+    assert record["provider_id"] == provider_id
+    assert record["endpoints"] == _normalize_endpoints(endpoints_2)
