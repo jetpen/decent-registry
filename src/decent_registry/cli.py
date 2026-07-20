@@ -11,6 +11,7 @@ import trio
 from libp2p.crypto.ed25519 import create_new_key_pair
 
 from decent_registry.dht.libp2p_dht import Libp2pKadDHT
+from decent_registry.durable_store import LMDBDatastore
 from decent_registry.encoding import encode_signed_update
 from decent_registry.provider_schema import build_provider_payload_dict
 from decent_registry.signed_envelope import encode_signed_envelope
@@ -69,9 +70,7 @@ def _load_ed25519_keypair_from_privkey_pem_path(privkey_pem_path: str):
         except Exception:
             raise _OwnerPrivkeyFileReadError("cannot read owner private key file") from None
 
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
-            Ed25519PrivateKey,
-        )
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
         from cryptography.hazmat.primitives.serialization import (
             Encoding,
             NoEncryption,
@@ -136,6 +135,26 @@ def _add_network_args(p: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_datastore_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--datastore-path",
+        default=".scratch/decent-registry.lmdb",
+        help="LMDB datastore file path (default: .scratch/decent-registry.lmdb)",
+    )
+    p.add_argument(
+        "--mapsize",
+        type=int,
+        default=None,
+        help="LMDB mapsize in bytes (default: 1TB when omitted)",
+    )
+
+
+def _make_datastore_from_args(args: argparse.Namespace) -> LMDBDatastore:
+    if args.mapsize is None:
+        return LMDBDatastore(path=args.datastore_path)
+    return LMDBDatastore(path=args.datastore_path, mapsize_bytes=args.mapsize)
+
+
 def _keygen_command(args: argparse.Namespace) -> int:
     output_path = args.output
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -165,7 +184,8 @@ def _node_command(args: argparse.Namespace) -> int:
     async def _async_node() -> int:
         endpoints = _parse_endpoints(args.bootstrap or [])
         listen = f"/ip4/{args.host}/tcp/{args.port}"
-        async with Libp2pKadDHT(listen=listen) as dht:
+        datastore = _make_datastore_from_args(args)
+        async with Libp2pKadDHT(listen=listen, durable_store=datastore) as dht:
             node_peer_id = dht.host.get_id().to_string()
             logger.info("Node %s listening on %s", node_peer_id, dht.get_listen_multiaddr())
             ok = True
@@ -195,7 +215,8 @@ def _put_provider_command(args: argparse.Namespace) -> int:
         seeds = _parse_endpoints(args.bootstrap or [])
         listen = f"/ip4/{args.host}/tcp/{args.port}"
 
-        async with Libp2pKadDHT(listen=listen) as dht:
+        datastore = _make_datastore_from_args(args)
+        async with Libp2pKadDHT(listen=listen, durable_store=datastore) as dht:
             for seed in seeds:
                 await dht.bootstrap(seed)
             await trio.sleep(1.0)
@@ -245,7 +266,8 @@ def _get_provider_command(args: argparse.Namespace) -> int:
         seeds = _parse_endpoints(args.bootstrap or [])
         listen = f"/ip4/{args.host}/tcp/{args.port}"
 
-        async with Libp2pKadDHT(listen=listen) as dht:
+        datastore = _make_datastore_from_args(args)
+        async with Libp2pKadDHT(listen=listen, durable_store=datastore) as dht:
             for seed in seeds:
                 await dht.bootstrap(seed)
             await trio.sleep(1.0)
@@ -271,7 +293,8 @@ def _put_identity_command(args: argparse.Namespace) -> int:
         seeds = _parse_endpoints(args.bootstrap or [])
         listen = f"/ip4/{args.host}/tcp/{args.port}"
 
-        async with Libp2pKadDHT(listen=listen) as dht:
+        datastore = _make_datastore_from_args(args)
+        async with Libp2pKadDHT(listen=listen, durable_store=datastore) as dht:
             for seed in seeds:
                 await dht.bootstrap(seed)
             await trio.sleep(1.0)
@@ -321,7 +344,8 @@ def _get_identity_command(args: argparse.Namespace) -> int:
         seeds = _parse_endpoints(args.bootstrap or [])
         listen = f"/ip4/{args.host}/tcp/{args.port}"
 
-        async with Libp2pKadDHT(listen=listen) as dht:
+        datastore = _make_datastore_from_args(args)
+        async with Libp2pKadDHT(listen=listen, durable_store=datastore) as dht:
             for seed in seeds:
                 await dht.bootstrap(seed)
             await trio.sleep(1.0)
@@ -365,6 +389,7 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="If set, run bootstrap + listen for N seconds then exit",
     )
+    _add_datastore_args(node_p)
 
     # put
     put_p = subparsers.add_parser("put", help="Publish a signed record")
@@ -386,6 +411,7 @@ def main(argv: list[str] | None = None) -> None:
         formatter_class=argparse.RawTextHelpFormatter,
     )
     _add_network_args(put_provider_p)
+    _add_datastore_args(put_provider_p)
     put_provider_p.add_argument("--object-hash", dest="object_hash", required=True)
     put_provider_p.add_argument("--provider-id", required=True)
     put_provider_p.add_argument(
@@ -417,6 +443,7 @@ def main(argv: list[str] | None = None) -> None:
         formatter_class=argparse.RawTextHelpFormatter,
     )
     _add_network_args(put_identity_p)
+    _add_datastore_args(put_identity_p)
     put_identity_p.add_argument("--owner-name", dest="owner_name", required=True)
     put_identity_p.add_argument(
         "--owner-privkey",
@@ -441,6 +468,7 @@ def main(argv: list[str] | None = None) -> None:
         formatter_class=argparse.RawTextHelpFormatter,
     )
     _add_network_args(get_provider_p)
+    _add_datastore_args(get_provider_p)
     get_provider_p.add_argument("--object-hash", dest="object_hash", required=True)
 
     get_identity_p = get_sub.add_parser(
@@ -456,6 +484,7 @@ def main(argv: list[str] | None = None) -> None:
         formatter_class=argparse.RawTextHelpFormatter,
     )
     _add_network_args(get_identity_p)
+    _add_datastore_args(get_identity_p)
     get_identity_p.add_argument("--owner-name", dest="owner_name", required=True)
 
     # keygen
@@ -477,7 +506,7 @@ def main(argv: list[str] | None = None) -> None:
 
     args = parser.parse_args(argv)
     _configure_logging(args.verbose)
-    
+
     if args.cmd == "node":
         raise SystemExit(_node_command(args))
     if args.cmd == "keygen":
