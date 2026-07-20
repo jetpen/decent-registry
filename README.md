@@ -111,7 +111,7 @@ Required:
 - `--host`, `--port`, `--bootstrap`
 - `--object-hash <64-hex>`
 - `--provider-id <64-hex>`
-- `--owner-privkey <ed25519_privkey_hex>`
+- `--owner-privkey <owner_privkey_pem_path>`
 - `--seq <monotonic int>`
 - `--endpoint <multiaddr>` (repeatable; also accepts comma-separated)
 
@@ -122,7 +122,7 @@ decent-registry put provider \
   --bootstrap <bootstrap> \
   --object-hash <64-hex> \
   --provider-id <64-hex> \
-  --owner-privkey <ed25519_privkey_hex> \
+  --owner-privkey <owner_privkey_pem_path> \
   --seq 1 \
   --endpoint /ip4/127.0.0.1/tcp/9000
 ```
@@ -140,7 +140,7 @@ Publishes a signed **identity update** under the DHT key:
 Required:
 - `--host`, `--port`, `--bootstrap`
 - `--owner-name <hex bytes>`
-- `--owner-privkey <ed25519_privkey_hex>`
+- `--owner-privkey <owner_privkey_pem_path>`
 - `--seq <monotonic int>`
 
 Example:
@@ -149,7 +149,7 @@ decent-registry put identity \
   --host 127.0.0.1 --port <node_port> \
   --bootstrap <bootstrap> \
   --owner-name <owner_name_hex> \
-  --owner-privkey <ed25519_privkey_hex> \
+  --owner-privkey <owner_privkey_pem_path> \
   --seq 1
 ```
 
@@ -190,13 +190,28 @@ On missing prints `not found` and exits non-zero.
 
 ### Keys (Ed25519)
 
-Example: generate an owner private key hex for `--owner-privkey`.
+Generate an unencrypted PEM (PKCS#8) file for `--owner-privkey`:
 
 ```bash
 python3 - <<'PY'
-from libp2p.crypto.ed25519 import create_new_key_pair
-kp = create_new_key_pair()
-print(kp.private_key.to_bytes().hex())
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat
+import os
+
+priv = Ed25519PrivateKey.generate()
+pem = priv.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption())
+
+out_path = "owner_privkey.pem"
+with open(out_path, "wb") as f:
+    f.write(pem)
+
+# restrict permissions: owner read/write only
+os.chmod(out_path, 0o600)
+
+print(f"wrote {out_path} with mode 0o600")
 PY
 ```
+
+CLI must receive the path to this PEM file. Private key contents must never be echoed or logged.
+
 

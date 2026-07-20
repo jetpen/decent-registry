@@ -40,16 +40,80 @@ def _parse_hex_bytes(value: str, *, name: str) -> bytes:
     try:
         return bytes.fromhex(value)
     except Exception as e:
-        raise ValueError(f"{name} must be valid hex: {e}") from e
+        raise ValueError(f"{name} must be valid hex") from e
 
 
-def _derive_owner_keypair_from_privkey_hex(privkey_hex: str):
-    priv_bytes = _parse_hex_bytes(privkey_hex, name="owner_privkey")
-    priv_cls = type(create_new_key_pair().private_key)
-    priv_cls_any: Any = priv_cls  # type: ignore[assignment]
-    owner_priv = priv_cls_any.from_bytes(priv_bytes)
-    owner_pub = owner_priv.get_public_key()
-    return owner_priv, owner_pub.to_bytes()
+def _load_ed25519_keypair_from_privkey_pem_path(privkey_pem_path: str):
+    """Load an Ed25519 private key from an OpenSSL-compatible PEM file.
+
+    HARD RULE (ticket #27): private key material is a secret.
+    - Never log or print private key material.
+    - Never include private key material in exception messages.
+    - Avoid exception chaining that could leak parser internals.
+    """
+
+    # Only the file path crosses the CLI boundary.
+    pem_data: bytes | None = None
+    private_key = None
+    priv_raw: bytes | None = None
+
+    class _OwnerPrivkeyFileReadError(ValueError):
+        pass
+
+    try:
+        try:
+            with open(privkey_pem_path, "rb") as f:
+                pem_data = f.read()
+        except Exception:
+            raise _OwnerPrivkeyFileReadError("cannot read owner private key file") from None
+
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PrivateKey,
+        )
+        from cryptography.hazmat.primitives.serialization import (
+            Encoding,
+            NoEncryption,
+            PrivateFormat,
+            load_pem_private_key,
+        )
+
+        if pem_data is None:
+            raise RuntimeError("owner private key data missing")
+        private_key = load_pem_private_key(pem_data, password=None)
+
+        if not isinstance(private_key, Ed25519PrivateKey):
+            raise ValueError("unsupported private key type")
+
+        # libp2p expects raw Ed25519 private key bytes.
+        priv_raw = private_key.private_bytes(
+            encoding=Encoding.Raw,
+            format=PrivateFormat.Raw,
+            encryption_algorithm=NoEncryption(),
+        )
+
+        priv_cls = type(create_new_key_pair().private_key)
+        priv_cls_any: Any = priv_cls  # type: ignore[assignment]
+        owner_priv = priv_cls_any.from_bytes(priv_raw)
+        owner_pub = owner_priv.get_public_key()
+        return owner_priv, owner_pub.to_bytes()
+
+    except _OwnerPrivkeyFileReadError:
+        raise ValueError("cannot read owner private key file") from None
+    except ValueError:
+        raise ValueError("invalid owner private key file") from None
+    except Exception:
+        raise ValueError("invalid owner private key file") from None
+    finally:
+        # Reduce key material lifetime in-process.
+        try:
+            if pem_data is not None:
+                del pem_data
+            if priv_raw is not None:
+                del priv_raw
+            if private_key is not None:
+                del private_key
+        except Exception:
+            pass
 
 
 def _derive_identity_object_hash_from_owner_name_hex(owner_name_hex: str) -> str:
@@ -109,7 +173,7 @@ def _put_provider_command(args: argparse.Namespace) -> int:
                 await dht.bootstrap(seed)
             await trio.sleep(1.0)
 
-            owner_priv, owner_pub_bytes = _derive_owner_keypair_from_privkey_hex(
+            owner_priv, owner_pub_bytes = _load_ed25519_keypair_from_privkey_pem_path(
                 args.owner_privkey
             )
 
@@ -143,9 +207,9 @@ def _put_provider_command(args: argparse.Namespace) -> int:
 
     try:
         return trio.run(_async_put)
-    except Exception as e:
-        logger.error("put provider failed: %s", e)
-        print(str(e))
+    except Exception:
+        logger.error("put provider failed")
+        print("put failed")
         return 1
 
 
@@ -189,7 +253,7 @@ def _put_identity_command(args: argparse.Namespace) -> int:
                 args.owner_name
             )
 
-            owner_priv, owner_pub_bytes = _derive_owner_keypair_from_privkey_hex(
+            owner_priv, owner_pub_bytes = _load_ed25519_keypair_from_privkey_pem_path(
                 args.owner_privkey
             )
             owner_name_bytes = _parse_hex_bytes(args.owner_name, name="owner_name")
@@ -219,9 +283,9 @@ def _put_identity_command(args: argparse.Namespace) -> int:
 
     try:
         return trio.run(_async_put)
-    except Exception as e:
-        logger.error("put identity failed: %s", e)
-        print(str(e))
+    except Exception:
+        logger.error("put identity failed")
+        print("put failed")
         return 1
 
 
@@ -287,7 +351,7 @@ def main(argv: list[str] | None = None) -> None:
             "Required:\n"
             "- --object-hash <64-hex>\n"
             "- --provider-id <64-hex>\n"
-            "- --owner-privkey <ed25519_privkey_hex>\n"
+            "- --owner-privkey <owner_privkey_pem_path>\n"
             "- --seq <monotonic int>\n\n"
             "Optional:\n"
             "- --endpoint <multiaddr> (repeatable/comma-separated)"
@@ -301,7 +365,7 @@ def main(argv: list[str] | None = None) -> None:
         "--owner-privkey",
         dest="owner_privkey",
         required=True,
-        help="Ed25519 private key bytes as hex",
+        help="Path to an Ed25519 private key PEM file",
     )
     put_provider_p.add_argument("--seq", type=int, default=1, help="Monotonic seq number")
     put_provider_p.add_argument(
@@ -320,7 +384,7 @@ def main(argv: list[str] | None = None) -> None:
             "- DHT key object_key = sha256(owner_name_bytes)\n\n"
             "Required:\n"
             "- --owner-name <hex bytes>\n"
-            "- --owner-privkey <ed25519_privkey_hex>\n"
+            "- --owner-privkey <owner_privkey_pem_path>\n"
             "- --seq <monotonic int>"
         ),
         formatter_class=argparse.RawTextHelpFormatter,
@@ -331,7 +395,7 @@ def main(argv: list[str] | None = None) -> None:
         "--owner-privkey",
         dest="owner_privkey",
         required=True,
-        help="Ed25519 private key bytes as hex",
+        help="Path to an Ed25519 private key PEM file",
     )
     put_identity_p.add_argument("--seq", type=int, default=1, help="Monotonic seq number")
 
