@@ -2,6 +2,56 @@
 
 A decentralized, eventually consistent DHT-based registry prototype.
 
+## Protocol overview
+
+### Canonical CBOR and signing
+
+All signed data is encoded with canonical CBOR (RFC 7049 canonical encoding via `cbor2.dumps(..., canonical=True)`).
+
+**SignedUpdate** (input to the signature digest) is a canonical CBOR map:
+
+- `1`: `record_fields` (`map<uint, any>`)
+- `2`: `payload` (`map<uint, any>`)
+- `3`: `seq` (`uint`)
+
+**SignedEnvelope** is a canonical CBOR map:
+
+- `1`: `signed_update_bytes` (the canonical CBOR bytes of SignedUpdate)
+- `2`: `signature` (Ed25519 over `sha256(signed_update_bytes)`) 
+
+### Verification and overwrite rules
+
+When storing an update for a given `object_hash` key:
+
+- the signed envelope must be canonical
+- the Ed25519 signature must verify
+- `seq` must be strictly increasing for that `object_hash`
+- the first accepted owner binds the record; later overwrites must use the same owner public key
+
+### Provider record schema (payload)
+
+The provider payload is a CBOR map with unsigned integer keys:
+
+- `1`: `alg` (currently `Ed25519`)
+- `2`: `version` (`uint`)
+- `3`: `object_hash` (64-hex string)
+- `4`: `provider_id` (64-hex string)
+- `5`: `endpoints` (`list<string>`)
+
+Endpoint validation/signing constraints:
+
+- each endpoint must be a multiaddr string starting with `/`
+- endpoints are normalized and **lexicographically sorted before signing**
+- endpoints list is limited to 32 entries; each endpoint string is limited to 256 bytes
+
+### DHT storage
+
+libp2p Kad-DHT stores the **SignedEnvelope CBOR bytes** under a namespaced key:
+
+`/decent-registry/provider/{object_hash}`.
+
+`get` reads the envelope, verifies it, and returns the decoded provider payload.
+
 ## CLI
 
 Console script: `decent-registry`
@@ -49,6 +99,7 @@ decent-registry put \
 Notes:
 - `--endpoint` may also be passed comma-separated; endpoints are normalized to lexicographic order before signing.
 - The stored value is a canonical-CBOR signed envelope; verification enforces signature validity and seq monotonicity at overwrite time.
+- The signed-provider path currently has no TTL/expiry fields; TTL/expiry exists only in the legacy JSON `ProviderRecord` API in the DHT layer.
 
 ### `get`
 
@@ -66,7 +117,7 @@ On success prints JSON:
 - `provider_id`: value from `--provider-id`
 - `endpoints`: provider endpoints (as provided, normalized/sorted)
 
-On missing/expired prints `not found` and exits non-zero.
+On missing prints `not found` and exits non-zero.
 
 ### Keys (Ed25519)
 
