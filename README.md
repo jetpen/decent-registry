@@ -149,4 +149,28 @@ PY
 
 ### Identity records
 
-Identity record `put`/`get` is not exposed by the current CLI; see #25 for the README coverage plan and the finalized identity hashing rules.
+Identity record `put`/`get` is not exposed by the current CLI.
+
+#### Intended identity `put` flow (spec)
+
+- Inputs:
+  - `owner_name` (bytes; used for identity lookup key derivation)
+  - `owner_public_key` (Ed25519 public key bytes)
+  - optional `aliases` (from the tagged-union identity schema; excluded from the identity lookup key derivation)
+  - strictly monotonic `seq` per identity lookup key
+- Lookup key derivation:
+  - `object_key = sha256(owner_name_bytes)`
+- SignedUpdate (same canonical CBOR + signature scheme as provider updates):
+  - `record_fields[1] = owner_name` (bytes)
+  - `record_fields[2] = owner_public_key` (bytes)
+  - `payload` is the tagged-union identity payload (issues #11–#14)
+  - `3: seq` in the SignedUpdate
+- Verification/writes:
+  - overwrite acceptance uses signature validity + `seq` strictly increasing per `object_key`
+  - owner binding for identity records is enforced via the `record_fields[1..2]` (current verification layer derives `object_key` from `owner_name` and binds to `owner_public_key`)
+
+#### Intended identity `get` flow (spec)
+
+- Read/verify the stored SignedEnvelope for `object_key = sha256(owner_name_bytes)`.
+- On success return a decoded identity record (owner name, owner public key, and aliases as represented in the tagged-union identity schema).
+- On missing/expired output `not found` and exit non-zero.
