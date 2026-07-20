@@ -12,6 +12,7 @@ Runs a libp2p Kad-DHT node.
 
 - Emits the node peer id and listen multiaddr (when `-v/--verbose` is used).
 - `--bootstrap` is optional; when provided it must be a libp2p **identify-style multiaddr** that includes `/p2p/<peerid>`.
+- `--run-seconds` runs bootstrap + listen for N seconds then exits.
 
 Example (seed node, run until Ctrl-C):
 
