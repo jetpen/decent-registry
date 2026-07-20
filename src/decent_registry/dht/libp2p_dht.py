@@ -1,4 +1,3 @@
-import json
 import sys
 import time
 from dataclasses import dataclass
@@ -15,39 +14,6 @@ from libp2p.tools.anyio_service.context import background_trio_service
 from decent_registry.storage_backend import StorageBackend
 from decent_registry.provider_schema import ProviderPayloadV1
 from decent_registry.record_validator import RecordValidator
-
-
-@dataclass
-class ProviderRecord:
-    """Registry application-level provider record (version 1 JSON schema)."""
-
-    object_hash: str
-    version: int = 1
-    ttl_seconds: int = 172800
-    expires_at: int = 0
-    providers: list[dict[str, Any]] | None = None
-
-    def to_bytes(self) -> bytes:
-        d: dict[str, Any] = {
-            "version": self.version,
-            "object_hash": self.object_hash,
-            "ttl_seconds": self.ttl_seconds,
-            "expires_at": self.expires_at,
-        }
-        if self.providers is not None:
-            d["providers"] = self.providers
-        return json.dumps(d, sort_keys=True).encode("utf-8")
-
-    @staticmethod
-    def from_bytes(raw: bytes) -> "ProviderRecord":
-        d = json.loads(raw.decode("utf-8"))
-        return ProviderRecord(
-            object_hash=d["object_hash"],
-            version=d.get("version", 1),
-            ttl_seconds=d.get("ttl_seconds", 0),
-            expires_at=d.get("expires_at", 0),
-            providers=d.get("providers"),
-        )
 
 
 class Libp2pKadDHT:
@@ -150,24 +116,6 @@ class Libp2pKadDHT:
 
     def _kad_key(self, object_hash: str, *, kind: str = "provider") -> str:
         return f"/decent-registry/{kind}/{object_hash}"
-
-    async def put_provider_record(self, record: ProviderRecord) -> None:
-        await self.dht.put_value(self._kad_key(record.object_hash), record.to_bytes())
-
-    async def get_provider_record(
-        self, object_hash: str, quorum: int = 0
-    ) -> ProviderRecord | None:
-        raw = await self.dht.get_value(self._kad_key(object_hash), quorum=quorum)
-        if raw is None:
-            return None
-
-        record = ProviderRecord.from_bytes(raw)
-        expires_at = record.expires_at or 0
-        if expires_at > 0 and time.time() > expires_at:
-            return None
-
-        return record
-
     async def put_signed_provider_record(
         self, object_hash: str, envelope_cbor: bytes
     ) -> None:
