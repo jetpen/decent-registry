@@ -44,11 +44,26 @@ Endpoint validation/signing constraints:
 - endpoints are normalized and **lexicographically sorted before signing**
 - endpoints list is limited to 32 entries; each endpoint string is limited to 256 bytes
 
+### Identity record schema (verification inputs)
+
+SignedUpdate `record_fields` for an identity record are interpreted as:
+
+- `record_fields[1]`: `owner_name` bytes
+- `record_fields[2]`: `owner_public_key` bytes (Ed25519 public key)
+
+Identity record lookup key derivation (and owner binding):
+
+- `record_key = sha256(owner_name_bytes)`
+- verification binds the signed update to `owner_public_key` for that `record_key`
+
+Current implementation note:
+- current verification logic derives the identity key and owner binding from the `record_fields` above; it does not enforce additional identity payload fields at this layer (payload fields are reserved for the tagged-union identity schema from issues #11–#14).
+
 ### DHT storage
 
 libp2p Kad-DHT stores the **SignedEnvelope CBOR bytes** under a namespaced key:
 
-`/decent-registry/provider/{object_hash}`.
+- provider: `/decent-registry/provider/{object_hash}`
 
 `get` reads the envelope, verifies it, and returns the decoded provider payload.
 
