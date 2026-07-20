@@ -152,12 +152,12 @@ class Libp2pKadDHT:
         return f"/decent-registry/{kind}/{object_hash}"
 
     async def put_provider_record(self, record: ProviderRecord) -> None:
-        await self._dht.put_value(self._kad_key(record.object_hash), record.to_bytes())
+        await self.dht.put_value(self._kad_key(record.object_hash), record.to_bytes())
 
     async def get_provider_record(
         self, object_hash: str, quorum: int = 0
     ) -> ProviderRecord | None:
-        raw = await self._dht.get_value(self._kad_key(object_hash), quorum=quorum)
+        raw = await self.dht.get_value(self._kad_key(object_hash), quorum=quorum)
         if raw is None:
             return None
 
@@ -176,7 +176,7 @@ class Libp2pKadDHT:
         record_key = bytes.fromhex(object_hash)
         kad_key = self._kad_key(object_hash)
 
-        raw_existing = await self._dht.get_value(kad_key, quorum=0)
+        raw_existing = await self.dht.get_value(kad_key, quorum=0)
 
         # Validation: pure, no network I/O.
         self._validator.validate_provider_overwrite(
@@ -185,7 +185,7 @@ class Libp2pKadDHT:
             existing_envelope_cbor=raw_existing,
         )
 
-        await self._dht.put_value(kad_key, envelope_cbor)
+        await self.dht.put_value(kad_key, envelope_cbor)
 
         if self._durable_store is not None:
             self._durable_store.put(
@@ -200,7 +200,7 @@ class Libp2pKadDHT:
         record_key = bytes.fromhex(object_key_hex)
         kad_key = self._kad_key(object_key_hex, kind="identity")
 
-        raw_existing = await self._dht.get_value(kad_key, quorum=0)
+        raw_existing = await self.dht.get_value(kad_key, quorum=0)
 
         # Validation: pure, no network I/O.
         self._validator.validate_identity_overwrite(
@@ -209,7 +209,7 @@ class Libp2pKadDHT:
             existing_envelope_cbor=raw_existing,
         )
 
-        await self._dht.put_value(kad_key, envelope_cbor)
+        await self.dht.put_value(kad_key, envelope_cbor)
 
         if self._durable_store is not None:
             self._durable_store.put(
@@ -245,7 +245,7 @@ class Libp2pKadDHT:
 
         # 1) Try DHT first
         try:
-            raw_dht = await self._dht.get_value(kad_key, quorum=quorum)
+            raw_dht = await self.dht.get_value(kad_key, quorum=quorum)
         except Exception:
             raw_dht = None
 
@@ -282,7 +282,7 @@ class Libp2pKadDHT:
 
         # 1) Try DHT first
         try:
-            raw_dht = await self._dht.get_value(kad_key, quorum=quorum)
+            raw_dht = await self.dht.get_value(kad_key, quorum=quorum)
         except Exception:
             raw_dht = None
 

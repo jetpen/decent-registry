@@ -26,7 +26,7 @@ def _keypair():
 
 def _identity_update(*, owner_name: bytes, owner_pubkey: bytes, seq: int) -> bytes:
     record_fields = {1: owner_name, 2: owner_pubkey}
-    payload = {}
+    payload: dict[int, object] = {}
     return encode_signed_update(
         record_fields=record_fields,
         payload=payload,
