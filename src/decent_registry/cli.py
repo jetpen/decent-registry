@@ -10,6 +10,17 @@ from typing import Any
 import trio
 from libp2p.crypto.ed25519 import create_new_key_pair
 
+from decent_registry.config import (
+    DEFAULT_CLI_CONFIG_PATH,
+    DEFAULT_SERVER_CONFIG_PATH,
+    apply_cli_overrides_to_client,
+    apply_cli_overrides_to_server,
+    load_client_config,
+    load_server_config,
+    resolve_client_config,
+    resolve_required_owner_privkey_pem_path,
+    resolve_server_config,
+)
 from decent_registry.dht.libp2p_dht import Libp2pKadDHT
 from decent_registry.durable_store import LMDBDatastore
 from decent_registry.encoding import encode_signed_update
@@ -20,7 +31,10 @@ from decent_registry.verification import make_signed_update_signature
 logger = logging.getLogger("decent-registry.cli")
 
 
-def _configure_logging(verbosity: int) -> None:
+def _configure_logging(verbosity: int | None) -> None:
+    # argparse now defaults --verbose to None; treat it as 0 (WARNING).
+    if verbosity is None:
+        verbosity = 0
     level = logging.WARNING
     if verbosity == 1:
         level = logging.INFO
@@ -123,12 +137,14 @@ def _derive_identity_object_hash_from_owner_name_hex(owner_name_hex: str) -> str
 
 
 def _add_network_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, required=True)
+    # All network fields are optional here so a config file can supply defaults.
+    # Final requiredness is enforced after config load + merge.
+    p.add_argument("--host", default=None)
+    p.add_argument("--port", type=int, default=None)
     p.add_argument(
         "--bootstrap",
         action="append",
-        default=[],
+        default=None,
         help=(
             "libp2p seed multiaddr(s) with /p2p/<peerid>; may repeat and/or be comma-separated"
         ),
@@ -138,8 +154,8 @@ def _add_network_args(p: argparse.ArgumentParser) -> None:
 def _add_datastore_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--datastore-path",
-        default=".scratch/decent-registry.lmdb",
-        help="LMDB datastore file path (default: .scratch/decent-registry.lmdb)",
+        default=None,
+        help="LMDB datastore path (defaults come from YAML or built-in config defaults)",
     )
     p.add_argument(
         "--mapsize",
@@ -181,6 +197,19 @@ def _keygen_command(args: argparse.Namespace) -> int:
 
 
 def _node_command(args: argparse.Namespace) -> int:
+    server_cfg = load_server_config(args.config)
+    server_cfg = apply_cli_overrides_to_server(server_cfg, args)
+    server_cfg = resolve_server_config(server_cfg)
+    _configure_logging(server_cfg.verbosity)
+
+    # Populate args so legacy code paths continue to use args.*
+    args.host = server_cfg.network_host
+    args.port = server_cfg.network_port
+    args.bootstrap = server_cfg.network_bootstrap
+    args.datastore_path = server_cfg.datastore_path
+    args.mapsize = server_cfg.mapsize_bytes
+    args.verbose = server_cfg.verbosity
+
     async def _async_node() -> int:
         endpoints = _parse_endpoints(args.bootstrap or [])
         listen = f"/ip4/{args.host}/tcp/{args.port}"
@@ -210,6 +239,20 @@ def _node_command(args: argparse.Namespace) -> int:
 
 
 def _put_provider_command(args: argparse.Namespace) -> int:
+    client_cfg = load_client_config(args.config)
+    client_cfg = apply_cli_overrides_to_client(client_cfg, args)
+    client_cfg = resolve_client_config(client_cfg)
+
+    args.host = client_cfg.network_host
+    args.port = client_cfg.network_port
+    args.bootstrap = client_cfg.network_bootstrap
+    args.datastore_path = client_cfg.datastore_path
+    args.mapsize = client_cfg.mapsize_bytes
+    args.verbose = client_cfg.verbosity
+
+    args.owner_privkey = resolve_required_owner_privkey_pem_path(client_cfg)
+    _configure_logging(client_cfg.verbosity)
+
     async def _async_put() -> int:
         endpoints = _parse_endpoints(args.endpoint or [])
         seeds = _parse_endpoints(args.bootstrap or [])
@@ -262,6 +305,19 @@ def _put_provider_command(args: argparse.Namespace) -> int:
 
 
 def _get_provider_command(args: argparse.Namespace) -> int:
+    client_cfg = load_client_config(args.config)
+    client_cfg = apply_cli_overrides_to_client(client_cfg, args)
+    client_cfg = resolve_client_config(client_cfg)
+
+    args.host = client_cfg.network_host
+    args.port = client_cfg.network_port
+    args.bootstrap = client_cfg.network_bootstrap
+    args.datastore_path = client_cfg.datastore_path
+    args.mapsize = client_cfg.mapsize_bytes
+    args.verbose = client_cfg.verbosity
+
+    _configure_logging(client_cfg.verbosity)
+
     async def _async_get() -> int:
         seeds = _parse_endpoints(args.bootstrap or [])
         listen = f"/ip4/{args.host}/tcp/{args.port}"
@@ -289,6 +345,20 @@ def _get_provider_command(args: argparse.Namespace) -> int:
 
 
 def _put_identity_command(args: argparse.Namespace) -> int:
+    client_cfg = load_client_config(args.config)
+    client_cfg = apply_cli_overrides_to_client(client_cfg, args)
+    client_cfg = resolve_client_config(client_cfg)
+
+    args.host = client_cfg.network_host
+    args.port = client_cfg.network_port
+    args.bootstrap = client_cfg.network_bootstrap
+    args.datastore_path = client_cfg.datastore_path
+    args.mapsize = client_cfg.mapsize_bytes
+    args.verbose = client_cfg.verbosity
+
+    args.owner_privkey = resolve_required_owner_privkey_pem_path(client_cfg)
+    _configure_logging(client_cfg.verbosity)
+
     async def _async_put() -> int:
         seeds = _parse_endpoints(args.bootstrap or [])
         listen = f"/ip4/{args.host}/tcp/{args.port}"
@@ -340,6 +410,19 @@ def _put_identity_command(args: argparse.Namespace) -> int:
 
 
 def _get_identity_command(args: argparse.Namespace) -> int:
+    client_cfg = load_client_config(args.config)
+    client_cfg = apply_cli_overrides_to_client(client_cfg, args)
+    client_cfg = resolve_client_config(client_cfg)
+
+    args.host = client_cfg.network_host
+    args.port = client_cfg.network_port
+    args.bootstrap = client_cfg.network_bootstrap
+    args.datastore_path = client_cfg.datastore_path
+    args.mapsize = client_cfg.mapsize_bytes
+    args.verbose = client_cfg.verbosity
+
+    _configure_logging(client_cfg.verbosity)
+
     async def _async_get() -> int:
         seeds = _parse_endpoints(args.bootstrap or [])
         listen = f"/ip4/{args.host}/tcp/{args.port}"
@@ -366,23 +449,18 @@ def _get_identity_command(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="decent-registry")
-    parser.add_argument("-v", "--verbose", action="count", default=0)
+    parser.add_argument("-v", "--verbose", action="count", default=None)
 
     subparsers = parser.add_subparsers(dest="cmd", required=True)
 
     # node
     node_p = subparsers.add_parser("node", help="Run a DHT node")
-    node_p.add_argument("--host", default="127.0.0.1")
-    node_p.add_argument("--port", type=int, required=True)
     node_p.add_argument(
-        "--bootstrap",
-        action="append",
-        default=[],
-        help=(
-            "libp2p seed multiaddr(s) for bootstrapping; must include /p2p/<peerid> "
-            "(may repeat and/or be comma-separated)"
-        ),
+        "--config",
+        default=str(DEFAULT_SERVER_CONFIG_PATH),
+        help="Path to server YAML config file (default: ~/.decent/registry.yaml)",
     )
+    _add_network_args(node_p)
     node_p.add_argument(
         "--run-seconds",
         type=float,
@@ -410,6 +488,11 @@ def main(argv: list[str] | None = None) -> None:
         ),
         formatter_class=argparse.RawTextHelpFormatter,
     )
+    put_provider_p.add_argument(
+        "--config",
+        default=str(DEFAULT_CLI_CONFIG_PATH),
+        help="Path to client YAML config (default: ~/.decent/registry_cli.yaml)",
+    )
     _add_network_args(put_provider_p)
     _add_datastore_args(put_provider_p)
     put_provider_p.add_argument("--object-hash", dest="object_hash", required=True)
@@ -417,8 +500,8 @@ def main(argv: list[str] | None = None) -> None:
     put_provider_p.add_argument(
         "--owner-privkey",
         dest="owner_privkey",
-        required=True,
-        help="Path to an Ed25519 private key PEM file",
+        required=False,
+        help="Path to an Ed25519 private key PEM file (optional if supplied in CLI config)",
     )
     put_provider_p.add_argument("--seq", type=int, default=1, help="Monotonic seq number")
     put_provider_p.add_argument(
@@ -442,14 +525,19 @@ def main(argv: list[str] | None = None) -> None:
         ),
         formatter_class=argparse.RawTextHelpFormatter,
     )
+    put_identity_p.add_argument(
+        "--config",
+        default=str(DEFAULT_CLI_CONFIG_PATH),
+        help="Path to client YAML config (default: ~/.decent/registry_cli.yaml)",
+    )
     _add_network_args(put_identity_p)
     _add_datastore_args(put_identity_p)
     put_identity_p.add_argument("--owner-name", dest="owner_name", required=True)
     put_identity_p.add_argument(
         "--owner-privkey",
         dest="owner_privkey",
-        required=True,
-        help="Path to an Ed25519 private key PEM file",
+        required=False,
+        help="Path to an Ed25519 private key PEM file (optional if supplied in CLI config)",
     )
     put_identity_p.add_argument("--seq", type=int, default=1, help="Monotonic seq number")
 
@@ -467,6 +555,11 @@ def main(argv: list[str] | None = None) -> None:
         ),
         formatter_class=argparse.RawTextHelpFormatter,
     )
+    get_provider_p.add_argument(
+        "--config",
+        default=str(DEFAULT_CLI_CONFIG_PATH),
+        help="Path to client YAML config (default: ~/.decent/registry_cli.yaml)",
+    )
     _add_network_args(get_provider_p)
     _add_datastore_args(get_provider_p)
     get_provider_p.add_argument("--object-hash", dest="object_hash", required=True)
@@ -482,6 +575,11 @@ def main(argv: list[str] | None = None) -> None:
             "- --owner-name <hex bytes>"
         ),
         formatter_class=argparse.RawTextHelpFormatter,
+    )
+    get_identity_p.add_argument(
+        "--config",
+        default=str(DEFAULT_CLI_CONFIG_PATH),
+        help="Path to client YAML config (default: ~/.decent/registry_cli.yaml)",
     )
     _add_network_args(get_identity_p)
     _add_datastore_args(get_identity_p)

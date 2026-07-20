@@ -13,6 +13,10 @@ class LMDBDatastore:
 
     Stores CBOR envelope bytes keyed by the registry lookup key bytes.
     Uses separate LMDB named DBs to isolate provider vs identity keyspaces.
+
+    `path` can be either:
+    - a directory (spec-style server default): LMDB will create data.mdb/lock.mdb inside
+    - a file path ending in `.lmdb` (legacy-style CLI default): LMDB will use that file
     """
 
     def __init__(
@@ -36,15 +40,28 @@ class LMDBDatastore:
         if self._env is not None:
             return
 
-        if self._path.parent:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
+        # Decide whether `path` is a directory (subdir=True) or a database file (subdir=False).
+        # - If it exists and is a dir => subdir=True
+        # - If it exists and is a file => subdir=False
+        # - If it doesn't exist, treat `.lmdb` as a file and anything else as a directory.
+        if self._path.exists():
+            subdir = self._path.is_dir()
+        else:
+            subdir = self._path.suffix != ".lmdb"
 
-        # subdir=False => `path` is the lmdb file; LMDB creates sparse backing.
+        if subdir:
+            self._path.mkdir(parents=True, exist_ok=True)
+        else:
+            if self._path.parent:
+                self._path.parent.mkdir(parents=True, exist_ok=True)
+
+        # subdir=True => `path` is a directory containing data.mdb.
+        # subdir=False => `path` is the lmdb file.
         env = lmdb.open(
             str(self._path),
             map_size=self._mapsize_bytes,
             max_dbs=2,
-            subdir=False,
+            subdir=subdir,
             create=True,
         )
 
