@@ -6,7 +6,6 @@ from typing import Any
 
 import trio
 from multiaddr import Multiaddr
-
 from libp2p import new_host
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.kad_dht.kad_dht import KadDHT, DHTMode
@@ -14,10 +13,8 @@ from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.tools.anyio_service.context import background_trio_service
 
 from decent_registry.durable_store import LMDBDatastore
-from decent_registry.encoding import decode_canonical_signed_update
-from decent_registry.provider_schema import ProviderPayloadV1, decode_provider_payload_dict
-from decent_registry.signed_envelope import decode_signed_envelope
-from decent_registry.verification import SeqStateEntry, validate_signed_update_overwrite
+from decent_registry.provider_schema import ProviderPayloadV1
+from decent_registry.record_validator import RecordValidator
 
 
 @dataclass
@@ -72,8 +69,8 @@ class Libp2pKadDHT:
         self._key_pair = create_new_key_pair()
         self._listen = Multiaddr(listen)
         self._host = new_host(key_pair=self._key_pair, enable_tcp=True)
-
         self._durable_store = durable_store
+        self._validator = RecordValidator()
 
         self._host_ctx: Any | None = None
         self._dht_ctx: Any | None = None
@@ -91,7 +88,6 @@ class Libp2pKadDHT:
     async def __aenter__(self) -> "Libp2pKadDHT":
         if self._durable_store is not None:
             self._durable_store.open()
-
         self._host_ctx = self._host.run(listen_addrs=[self._listen])
         try:
             await self._host_ctx.__aenter__()
@@ -169,61 +165,24 @@ class Libp2pKadDHT:
         expires_at = record.expires_at or 0
         if expires_at > 0 and time.time() > expires_at:
             return None
+
         return record
 
     async def put_signed_provider_record(
         self, object_hash: str, envelope_cbor: bytes
     ) -> None:
-        """Store a CBOR signed provider update, enforcing seq monotonic overwrite.
-
-        Input envelope format is defined in `src/decent_registry/signed_envelope.py`.
-        """
+        """Store a CBOR signed provider update, enforcing seq monotonic overwrite."""
 
         record_key = bytes.fromhex(object_hash)
         kad_key = self._kad_key(object_hash)
 
-        # Derive previous seq/owner from the stored envelope (if any).
-        prev: SeqStateEntry | None = None
         raw_existing = await self._dht.get_value(kad_key, quorum=0)
-        if raw_existing is not None:
-            try:
-                existing_signed_update_bytes, _existing_signature = decode_signed_envelope(
-                    raw_existing
-                )
-                existing_signed_update = decode_canonical_signed_update(
-                    existing_signed_update_bytes
-                )
-                seq = existing_signed_update[3]
-                record_fields = existing_signed_update[1]
 
-                # Provider record: record_fields[1]=owner_public_key bytes.
-                if (
-                    isinstance(record_fields, dict)
-                    and 1 in record_fields
-                    and isinstance(record_fields[1], (bytes, bytearray))
-                ):
-                    owner_public_key = bytes(record_fields[1])
-                else:
-                    raise ValueError("unrecognized record_fields shape")
-
-                prev = SeqStateEntry(
-                    owner_public_key=owner_public_key,
-                    seq=int(seq),
-                )
-            except Exception:
-                prev = None
-
-        seq_state: dict[bytes, SeqStateEntry] = {}
-        if prev is not None:
-            seq_state[record_key] = prev
-
-        signed_update_bytes, signature = decode_signed_envelope(envelope_cbor)
-        validate_signed_update_overwrite(
+        # Validation: pure, no network I/O.
+        self._validator.validate_provider_overwrite(
             record_key=record_key,
-            signed_update_bytes_canonical=signed_update_bytes,
-            signature=signature,
-            seq_state=seq_state,
-            update_state_on_success=False,
+            envelope_cbor=envelope_cbor,
+            existing_envelope_cbor=raw_existing,
         )
 
         await self._dht.put_value(kad_key, envelope_cbor)
@@ -241,49 +200,13 @@ class Libp2pKadDHT:
         record_key = bytes.fromhex(object_key_hex)
         kad_key = self._kad_key(object_key_hex, kind="identity")
 
-        # Seed seq monotonicity enforcement with the previous identity owner's
-        # public key, if an entry already exists.
-        prev: SeqStateEntry | None = None
         raw_existing = await self._dht.get_value(kad_key, quorum=0)
-        if raw_existing is not None:
-            try:
-                existing_signed_update_bytes, _existing_signature = decode_signed_envelope(
-                    raw_existing
-                )
-                existing_signed_update = decode_canonical_signed_update(
-                    existing_signed_update_bytes
-                )
-                seq = existing_signed_update[3]
-                record_fields = existing_signed_update[1]
 
-                # Identity record: record_fields[2]=owner_public_key bytes.
-                if (
-                    isinstance(record_fields, dict)
-                    and 2 in record_fields
-                    and isinstance(record_fields[2], (bytes, bytearray))
-                ):
-                    owner_public_key = bytes(record_fields[2])
-                else:
-                    raise ValueError("unrecognized identity record_fields shape")
-
-                prev = SeqStateEntry(
-                    owner_public_key=owner_public_key,
-                    seq=int(seq),
-                )
-            except Exception:
-                prev = None
-
-        seq_state: dict[bytes, SeqStateEntry] = {}
-        if prev is not None:
-            seq_state[record_key] = prev
-
-        signed_update_bytes, signature = decode_signed_envelope(envelope_cbor)
-        validate_signed_update_overwrite(
+        # Validation: pure, no network I/O.
+        self._validator.validate_identity_overwrite(
             record_key=record_key,
-            signed_update_bytes_canonical=signed_update_bytes,
-            signature=signature,
-            seq_state=seq_state,
-            update_state_on_success=False,
+            envelope_cbor=envelope_cbor,
+            existing_envelope_cbor=raw_existing,
         )
 
         await self._dht.put_value(kad_key, envelope_cbor)
@@ -308,31 +231,14 @@ class Libp2pKadDHT:
 
         def _decode_and_build(raw: bytes) -> dict[str, Any] | None:
             try:
-                signed_update_bytes, signature = decode_signed_envelope(raw)
-                validate_signed_update_overwrite(
-                    record_key=record_key,
-                    signed_update_bytes_canonical=signed_update_bytes,
-                    signature=signature,
-                    seq_state={},
-                    update_state_on_success=False,
+                res = self._validator.validate_identity_get(
+                    record_key=record_key, envelope_cbor=raw
                 )
-
-                signed_update = decode_canonical_signed_update(signed_update_bytes)
-                record_fields = signed_update[1]
-                seq = signed_update[3]
-
-                owner_name_bytes = record_fields.get(1)
-                owner_pub_bytes = record_fields.get(2)
-                if not isinstance(owner_name_bytes, (bytes, bytearray)):
-                    return None
-                if not isinstance(owner_pub_bytes, (bytes, bytearray)):
-                    return None
-
                 return {
                     "object_key": object_key_hex,
-                    "owner_name": bytes(owner_name_bytes).hex(),
-                    "owner_public_key": bytes(owner_pub_bytes).hex(),
-                    "seq": int(seq),
+                    "owner_name": res.owner_name_hex,
+                    "owner_public_key": res.owner_public_key.hex(),
+                    "seq": int(res.seq),
                 }
             except Exception:
                 return None
@@ -357,6 +263,7 @@ class Libp2pKadDHT:
         raw_local = self._durable_store.get(kind="identity", key=record_key)
         if raw_local is None:
             return None
+
         return _decode_and_build(raw_local)
 
     async def get_signed_provider_record(
@@ -367,19 +274,9 @@ class Libp2pKadDHT:
 
         def _decode_and_build(raw: bytes) -> ProviderPayloadV1 | None:
             try:
-                signed_update_bytes, signature = decode_signed_envelope(raw)
-                # Verify only; seq monotonicity is guaranteed by storage-side overwrite.
-                validate_signed_update_overwrite(
-                    record_key=record_key,
-                    signed_update_bytes_canonical=signed_update_bytes,
-                    signature=signature,
-                    seq_state={},
-                    update_state_on_success=False,
+                return self._validator.validate_provider_get(
+                    record_key=record_key, envelope_cbor=raw
                 )
-
-                signed_update = decode_canonical_signed_update(signed_update_bytes)
-                payload_map = signed_update[2]
-                return decode_provider_payload_dict(payload_map)
             except Exception:
                 return None
 
@@ -403,4 +300,5 @@ class Libp2pKadDHT:
         raw_local = self._durable_store.get(kind="provider", key=record_key)
         if raw_local is None:
             return None
+
         return _decode_and_build(raw_local)
