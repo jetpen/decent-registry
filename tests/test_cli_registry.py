@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.serialization import (
     PrivateFormat,
 )
 
-from decent_registry.cli import _load_ed25519_keypair_from_privkey_pem_path
+from decent_registry.crypto_utils import load_ed25519_keypair_from_privkey_pem_path
 from decent_registry.dht.libp2p_dht import Libp2pKadDHT
 from libp2p.crypto.ed25519 import create_new_key_pair
 
@@ -395,7 +395,7 @@ def test_cli_keygen_default_output(tmp_path):
     st_mode = pem_path.stat().st_mode & 0o777
     assert st_mode == 0o600
 
-    owner_priv, owner_pub_bytes = _load_ed25519_keypair_from_privkey_pem_path(
+    owner_priv, owner_pub_bytes = load_ed25519_keypair_from_privkey_pem_path(
         str(pem_path)
     )
     assert isinstance(owner_pub_bytes, bytes)
@@ -414,7 +414,7 @@ def test_cli_keygen_custom_output(tmp_path):
     st_mode = out_path.stat().st_mode & 0o777
     assert st_mode == 0o600
 
-    _, owner_pub_bytes = _load_ed25519_keypair_from_privkey_pem_path(str(out_path))
+    _, owner_pub_bytes = load_ed25519_keypair_from_privkey_pem_path(str(out_path))
     assert len(owner_pub_bytes) == 32
 
 
@@ -497,14 +497,14 @@ def test_cli_keygen_pem_openssl_compatibility(tmp_path):
 
 def test_load_ed25519_keypair_from_pem_valid(tmp_path):
     pem_path, owner_pub_hex = _write_ed25519_privkey_pem(tmp_path)
-    owner_priv, owner_pub_bytes = _load_ed25519_keypair_from_privkey_pem_path(pem_path)
+    owner_priv, owner_pub_bytes = load_ed25519_keypair_from_privkey_pem_path(pem_path)
     assert owner_pub_bytes.hex() == owner_pub_hex
 
 
 def test_load_ed25519_keypair_from_pem_missing_file(tmp_path):
     missing_path = str(tmp_path / "missing-owner_privkey.pem")
     with pytest.raises(ValueError) as exc:
-        _load_ed25519_keypair_from_privkey_pem_path(missing_path)
+        load_ed25519_keypair_from_privkey_pem_path(missing_path)
     assert str(exc.value) == "cannot read owner private key file"
 
 
@@ -512,7 +512,7 @@ def test_load_ed25519_keypair_from_pem_invalid_format(tmp_path):
     bad_path = tmp_path / "bad-owner_privkey.pem"
     bad_path.write_bytes(b"not a valid pem")
     with pytest.raises(ValueError) as exc:
-        _load_ed25519_keypair_from_privkey_pem_path(str(bad_path))
+        load_ed25519_keypair_from_privkey_pem_path(str(bad_path))
     assert str(exc.value) == "invalid owner private key file"
 
 
@@ -527,5 +527,5 @@ def test_load_ed25519_keypair_from_pem_wrong_key_type(tmp_path):
     pem_path.write_bytes(pem_bytes)
 
     with pytest.raises(ValueError) as exc:
-        _load_ed25519_keypair_from_privkey_pem_path(str(pem_path))
+        load_ed25519_keypair_from_privkey_pem_path(str(pem_path))
     assert str(exc.value) == "invalid owner private key file"

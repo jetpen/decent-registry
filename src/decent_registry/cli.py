@@ -1,5 +1,4 @@
 import argparse
-import hashlib
 import json
 import logging
 import os
@@ -8,7 +7,6 @@ import sys
 from typing import Any
 
 import trio
-from libp2p.crypto.ed25519 import create_new_key_pair
 
 from decent_registry.config import (
     DEFAULT_CLI_CONFIG_PATH,
@@ -22,11 +20,8 @@ from decent_registry.config import (
     resolve_server_config,
 )
 from decent_registry.dht.libp2p_dht import Libp2pKadDHT
+from decent_registry.registry_service import RegistryService
 from decent_registry.durable_store import LMDBDatastore
-from decent_registry.encoding import encode_signed_update
-from decent_registry.provider_schema import build_provider_payload_dict
-from decent_registry.signed_envelope import encode_signed_envelope
-from decent_registry.verification import make_signed_update_signature
 
 logger = logging.getLogger("decent-registry.cli")
 
@@ -51,89 +46,6 @@ def _parse_endpoints(values: list[str]) -> list[str]:
         parts = [p.strip() for p in v.split(",") if p.strip()]
         eps.extend(parts)
     return eps
-
-
-def _parse_hex_bytes(value: str, *, name: str) -> bytes:
-    try:
-        return bytes.fromhex(value)
-    except Exception as e:
-        raise ValueError(f"{name} must be valid hex") from e
-
-
-def _load_ed25519_keypair_from_privkey_pem_path(privkey_pem_path: str):
-    """Load an Ed25519 private key from an OpenSSL-compatible PEM file.
-
-    HARD RULE (ticket #27): private key material is a secret.
-    - Never log or print private key material.
-    - Never include private key material in exception messages.
-    - Avoid exception chaining that could leak parser internals.
-    """
-
-    # Only the file path crosses the CLI boundary.
-    pem_data: bytes | None = None
-    private_key = None
-    priv_raw: bytes | None = None
-
-    class _OwnerPrivkeyFileReadError(ValueError):
-        pass
-
-    try:
-        try:
-            with open(privkey_pem_path, "rb") as f:
-                pem_data = f.read()
-        except Exception:
-            raise _OwnerPrivkeyFileReadError("cannot read owner private key file") from None
-
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-        from cryptography.hazmat.primitives.serialization import (
-            Encoding,
-            NoEncryption,
-            PrivateFormat,
-            load_pem_private_key,
-        )
-
-        if pem_data is None:
-            raise RuntimeError("owner private key data missing")
-        private_key = load_pem_private_key(pem_data, password=None)
-
-        if not isinstance(private_key, Ed25519PrivateKey):
-            raise ValueError("unsupported private key type")
-
-        # libp2p expects raw Ed25519 private key bytes.
-        priv_raw = private_key.private_bytes(
-            encoding=Encoding.Raw,
-            format=PrivateFormat.Raw,
-            encryption_algorithm=NoEncryption(),
-        )
-
-        priv_cls = type(create_new_key_pair().private_key)
-        priv_cls_any: Any = priv_cls  # type: ignore[assignment]
-        owner_priv = priv_cls_any.from_bytes(priv_raw)
-        owner_pub = owner_priv.get_public_key()
-        return owner_priv, owner_pub.to_bytes()
-
-    except _OwnerPrivkeyFileReadError:
-        raise ValueError("cannot read owner private key file") from None
-    except ValueError:
-        raise ValueError("invalid owner private key file") from None
-    except Exception:
-        raise ValueError("invalid owner private key file") from None
-    finally:
-        # Reduce key material lifetime in-process.
-        try:
-            if pem_data is not None:
-                del pem_data
-            if priv_raw is not None:
-                del priv_raw
-            if private_key is not None:
-                del private_key
-        except Exception:
-            pass
-
-
-def _derive_identity_object_hash_from_owner_name_hex(owner_name_hex: str) -> str:
-    owner_name_bytes = _parse_hex_bytes(owner_name_hex, name="owner_name")
-    return hashlib.sha256(owner_name_bytes).hexdigest()
 
 
 def _add_network_args(p: argparse.ArgumentParser) -> None:
@@ -264,35 +176,16 @@ def _put_provider_command(args: argparse.Namespace) -> int:
                 await dht.bootstrap(seed)
             await trio.sleep(1.0)
 
-            owner_priv, owner_pub_bytes = _load_ed25519_keypair_from_privkey_pem_path(
-                args.owner_privkey
-            )
-
-            payload_dict: dict[int, Any] = build_provider_payload_dict(
-                alg="Ed25519",
-                version=1,
+            service = RegistryService(dht=dht)
+            await service.put_provider(
                 object_hash=args.object_hash,
                 provider_id=args.provider_id,
-                endpoints=endpoints,
-            )
-
-            record_fields: dict[int, Any] = {1: owner_pub_bytes}
-
-            signed_update_bytes = encode_signed_update(
-                record_fields=record_fields,
-                payload=payload_dict,
+                owner_privkey_pem_path=args.owner_privkey,
                 seq=int(args.seq),
+                endpoints=endpoints,
+                alg="Ed25519",
+                version=1,
             )
-            signature = make_signed_update_signature(
-                signed_update_bytes_canonical=signed_update_bytes,
-                owner_private_key=owner_priv,
-            )
-            envelope_cbor = encode_signed_envelope(
-                signed_update_bytes=signed_update_bytes,
-                signature=signature,
-            )
-
-            await dht.put_signed_provider_record(args.object_hash, envelope_cbor)
             print(1)
             return 0
 
@@ -328,7 +221,8 @@ def _get_provider_command(args: argparse.Namespace) -> int:
                 await dht.bootstrap(seed)
             await trio.sleep(1.0)
 
-            provider_payload = await dht.get_signed_provider_record(args.object_hash)
+            service = RegistryService(dht=dht)
+            provider_payload = await service.get_provider(object_hash=args.object_hash)
             if provider_payload is None:
                 print("not found")
                 return 1
@@ -369,35 +263,12 @@ def _put_identity_command(args: argparse.Namespace) -> int:
                 await dht.bootstrap(seed)
             await trio.sleep(1.0)
 
-            object_key_hex = _derive_identity_object_hash_from_owner_name_hex(
-                args.owner_name
-            )
-
-            owner_priv, owner_pub_bytes = _load_ed25519_keypair_from_privkey_pem_path(
-                args.owner_privkey
-            )
-            owner_name_bytes = _parse_hex_bytes(args.owner_name, name="owner_name")
-
-            record_fields: dict[int, Any] = {
-                1: owner_name_bytes,
-                2: owner_pub_bytes,
-            }
-
-            signed_update_bytes = encode_signed_update(
-                record_fields=record_fields,
-                payload={},
+            service = RegistryService(dht=dht)
+            await service.put_identity(
+                owner_name_hex=args.owner_name,
+                owner_privkey_pem_path=args.owner_privkey,
                 seq=int(args.seq),
             )
-            signature = make_signed_update_signature(
-                signed_update_bytes_canonical=signed_update_bytes,
-                owner_private_key=owner_priv,
-            )
-            envelope_cbor = encode_signed_envelope(
-                signed_update_bytes=signed_update_bytes,
-                signature=signature,
-            )
-
-            await dht.put_signed_identity_record(object_key_hex, envelope_cbor)
             print(1)
             return 0
 
@@ -433,10 +304,8 @@ def _get_identity_command(args: argparse.Namespace) -> int:
                 await dht.bootstrap(seed)
             await trio.sleep(1.0)
 
-            object_key_hex = _derive_identity_object_hash_from_owner_name_hex(
-                args.owner_name
-            )
-            record = await dht.get_signed_identity_record(object_key_hex)
+            service = RegistryService(dht=dht)
+            record = await service.get_identity(owner_name_hex=args.owner_name)
             if record is None:
                 print("not found")
                 return 1
