@@ -27,6 +27,7 @@ When storing an update for a given `object_hash` key:
 - the Ed25519 signature must verify
 - `seq` must be strictly increasing for that `object_hash`
 - the first accepted owner binds the record; later overwrites must use the same owner public key
+- key revocation is specified as a future design in #15 (allow object rewrites signed with an identity key that has been revoked)
 
 ### Provider record schema (payload)
 
