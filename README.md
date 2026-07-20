@@ -193,23 +193,7 @@ On missing prints `not found` and exits non-zero.
 Generate an unencrypted PEM (PKCS#8) file for `--owner-privkey`:
 
 ```bash
-python3 - <<'PY'
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat
-import os
-
-priv = Ed25519PrivateKey.generate()
-pem = priv.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption())
-
-out_path = "owner_privkey.pem"
-with open(out_path, "wb") as f:
-    f.write(pem)
-
-# restrict permissions: owner read/write only
-os.chmod(out_path, 0o600)
-
-print(f"wrote {out_path} with mode 0o600")
-PY
+decent-registry keygen [--output <path>]
 ```
 
 CLI must receive the path to this PEM file. Private key contents must never be echoed or logged.

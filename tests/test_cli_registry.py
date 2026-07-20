@@ -44,6 +44,16 @@ def _run_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
 
+def _run_cli_in_dir(
+    args: list[str], *, cwd: str
+) -> subprocess.CompletedProcess[str]:
+    exe = _decent_registry_exe()
+    cmd = [exe] + args
+    return subprocess.run(
+        cmd, capture_output=True, text=True, timeout=30, cwd=cwd
+    )
+
+
 def _start_libp2p_seed(seed_port: int, alive_seconds: float = 15.0):
     ready_q: "queue.Queue[tuple[str, str]]" = queue.Queue(maxsize=1)
 
@@ -369,6 +379,42 @@ def test_cli_identity_seq_monotonic_overwrite_rejected(tmp_path):
     assert get_res.returncode == 0, f"get identity failed: {get_res.stdout} {get_res.stderr}"
     record = json.loads(get_res.stdout)
     assert record["seq"] == 1
+
+
+def test_cli_keygen_default_output(tmp_path):
+    # default output is relative to the process working directory
+    res = _run_cli_in_dir(["keygen"], cwd=str(tmp_path))
+    assert res.returncode == 0, f"keygen failed: {res.stdout} {res.stderr}"
+    assert "wrote owner_privkey.pem with mode 0o600" in res.stdout
+    assert "BEGIN" not in res.stdout
+    assert "BEGIN" not in res.stderr
+
+    pem_path = tmp_path / "owner_privkey.pem"
+    assert pem_path.exists()
+    st_mode = pem_path.stat().st_mode & 0o777
+    assert st_mode == 0o600
+
+    owner_priv, owner_pub_bytes = _load_ed25519_keypair_from_privkey_pem_path(
+        str(pem_path)
+    )
+    assert isinstance(owner_pub_bytes, bytes)
+    assert len(owner_pub_bytes) == 32
+
+
+def test_cli_keygen_custom_output(tmp_path):
+    out_path = tmp_path / "custom-owner_privkey.pem"
+    res = _run_cli(["keygen", "--output", str(out_path)])
+    assert res.returncode == 0, f"keygen failed: {res.stdout} {res.stderr}"
+    assert f"wrote {out_path} with mode 0o600" in res.stdout
+    assert "BEGIN" not in res.stdout
+    assert "BEGIN" not in res.stderr
+
+    assert out_path.exists()
+    st_mode = out_path.stat().st_mode & 0o777
+    assert st_mode == 0o600
+
+    _, owner_pub_bytes = _load_ed25519_keypair_from_privkey_pem_path(str(out_path))
+    assert len(owner_pub_bytes) == 32
 
 
 def test_load_ed25519_keypair_from_pem_valid(tmp_path):

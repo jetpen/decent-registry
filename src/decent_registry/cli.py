@@ -2,7 +2,9 @@ import argparse
 import hashlib
 import json
 import logging
+import os
 import signal
+import sys
 from typing import Any
 
 import trio
@@ -132,6 +134,31 @@ def _add_network_args(p: argparse.ArgumentParser) -> None:
             "libp2p seed multiaddr(s) with /p2p/<peerid>; may repeat and/or be comma-separated"
         ),
     )
+
+
+def _keygen_command(args: argparse.Namespace) -> int:
+    output_path = args.output
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import (
+        Encoding,
+        NoEncryption,
+        PrivateFormat,
+    )
+
+    try:
+        priv = Ed25519PrivateKey.generate()
+        pem_bytes = priv.private_bytes(
+            Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()
+        )
+        with open(output_path, "wb") as f:
+            f.write(pem_bytes)
+        os.chmod(output_path, 0o600)
+        print(f"wrote {output_path} with mode 0o600")
+        return 0
+    except OSError:
+        # No private key material in errors.
+        print("error: cannot write key file", file=sys.stderr)
+        return 1
 
 
 def _node_command(args: argparse.Namespace) -> int:
@@ -431,12 +458,30 @@ def main(argv: list[str] | None = None) -> None:
     _add_network_args(get_identity_p)
     get_identity_p.add_argument("--owner-name", dest="owner_name", required=True)
 
+    # keygen
+    keygen_p = subparsers.add_parser(
+        "keygen",
+        help="Generate an Ed25519 private key (PKCS#8 PEM)",
+        description=(
+            "Generate an unencrypted Ed25519 private key in PKCS#8 PEM format.\n\n"
+            "The file permissions are set to 0o600.\n\n"
+            "Private key material is never printed or logged."
+        ),
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    keygen_p.add_argument(
+        "--output",
+        default="owner_privkey.pem",
+        help="Output PEM file path (default: owner_privkey.pem)",
+    )
+
     args = parser.parse_args(argv)
     _configure_logging(args.verbose)
-
+    
     if args.cmd == "node":
         raise SystemExit(_node_command(args))
-
+    if args.cmd == "keygen":
+        raise SystemExit(_keygen_command(args))
     if args.cmd == "put":
         if args.record_type == "provider":
             raise SystemExit(_put_provider_command(args))
