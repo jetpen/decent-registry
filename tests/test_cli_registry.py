@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import queue
@@ -73,6 +74,7 @@ def test_cli_put_get_round_trip_libp2p_kad_dht():
     put_res = _run_cli(
         [
             "put",
+            "provider",
             "--host",
             "127.0.0.1",
             "--port",
@@ -96,6 +98,7 @@ def test_cli_put_get_round_trip_libp2p_kad_dht():
     get_res = _run_cli(
         [
             "get",
+            "provider",
             "--host",
             "127.0.0.1",
             "--port",
@@ -129,6 +132,7 @@ def test_cli_seq_monotonic_overwrite_libp2p_kad_dht():
     put1 = _run_cli(
         [
             "put",
+            "provider",
             "--host",
             "127.0.0.1",
             "--port",
@@ -152,6 +156,7 @@ def test_cli_seq_monotonic_overwrite_libp2p_kad_dht():
     put2 = _run_cli(
         [
             "put",
+            "provider",
             "--host",
             "127.0.0.1",
             "--port",
@@ -176,6 +181,7 @@ def test_cli_seq_monotonic_overwrite_libp2p_kad_dht():
     put3 = _run_cli(
         [
             "put",
+            "provider",
             "--host",
             "127.0.0.1",
             "--port",
@@ -199,6 +205,7 @@ def test_cli_seq_monotonic_overwrite_libp2p_kad_dht():
     get_res = _run_cli(
         [
             "get",
+            "provider",
             "--host",
             "127.0.0.1",
             "--port",
@@ -215,3 +222,127 @@ def test_cli_seq_monotonic_overwrite_libp2p_kad_dht():
     assert record["object_key"] == obj
     assert record["provider_id"] == provider_id
     assert record["endpoints"] == _normalize_endpoints(endpoints_2)
+
+
+def test_cli_identity_put_get_round_trip_libp2p_kad_dht():
+    seed_port = _free_port()
+    _, seed_bootstrap = _start_libp2p_seed(seed_port, alive_seconds=20.0)
+
+    owner_priv_hex = create_new_key_pair().private_key.to_bytes().hex()
+    owner_name_bytes = b"owner-name-1"
+    owner_name_hex = owner_name_bytes.hex()
+    expected_object_key = hashlib.sha256(owner_name_bytes).hexdigest()
+
+    # Derive expected owner pubkey from the owner privkey.
+    owner_priv_cls = type(create_new_key_pair().private_key)
+    owner_priv = owner_priv_cls.from_bytes(bytes.fromhex(owner_priv_hex))
+    owner_pub_hex = owner_priv.get_public_key().to_bytes().hex()
+
+    put_res = _run_cli(
+        [
+            "put",
+            "identity",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(_free_port()),
+            "--bootstrap",
+            seed_bootstrap,
+            "--owner-name",
+            owner_name_hex,
+            "--owner-privkey",
+            owner_priv_hex,
+            "--seq",
+            "1",
+        ]
+    )
+    assert put_res.returncode == 0, f"put identity failed: {put_res.stdout} {put_res.stderr}"
+
+    get_res = _run_cli(
+        [
+            "get",
+            "identity",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(_free_port()),
+            "--bootstrap",
+            seed_bootstrap,
+            "--owner-name",
+            owner_name_hex,
+        ]
+    )
+    assert get_res.returncode == 0, f"get identity failed: {get_res.stdout} {get_res.stderr}"
+
+    record = json.loads(get_res.stdout)
+    assert record["object_key"] == expected_object_key
+    assert record["owner_name"] == owner_name_hex
+    assert record["owner_public_key"] == owner_pub_hex
+    assert record["seq"] == 1
+
+
+def test_cli_identity_seq_monotonic_overwrite_rejected():
+    seed_port = _free_port()
+    _, seed_bootstrap = _start_libp2p_seed(seed_port, alive_seconds=25.0)
+
+    owner_priv_hex = create_new_key_pair().private_key.to_bytes().hex()
+    owner_name_bytes = b"owner-name-2"
+    owner_name_hex = owner_name_bytes.hex()
+
+    put1 = _run_cli(
+        [
+            "put",
+            "identity",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(_free_port()),
+            "--bootstrap",
+            seed_bootstrap,
+            "--owner-name",
+            owner_name_hex,
+            "--owner-privkey",
+            owner_priv_hex,
+            "--seq",
+            "1",
+        ]
+    )
+    assert put1.returncode == 0, f"put identity 1 failed: {put1.stdout} {put1.stderr}"
+
+    put2 = _run_cli(
+        [
+            "put",
+            "identity",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(_free_port()),
+            "--bootstrap",
+            seed_bootstrap,
+            "--owner-name",
+            owner_name_hex,
+            "--owner-privkey",
+            owner_priv_hex,
+            "--seq",
+            "1",
+        ]
+    )
+    assert put2.returncode != 0, "expected lower/equal-seq overwrite to fail"
+
+    get_res = _run_cli(
+        [
+            "get",
+            "identity",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(_free_port()),
+            "--bootstrap",
+            seed_bootstrap,
+            "--owner-name",
+            owner_name_hex,
+        ]
+    )
+    assert get_res.returncode == 0, f"get identity failed: {get_res.stdout} {get_res.stderr}"
+    record = json.loads(get_res.stdout)
+    assert record["seq"] == 1

@@ -65,8 +65,9 @@ Current implementation note:
 libp2p Kad-DHT stores the **SignedEnvelope CBOR bytes** under a namespaced key:
 
 - provider: `/decent-registry/provider/{object_hash}`
+- identity: `/decent-registry/identity/{object_key}`
 
-`get` reads the envelope, verifies it, and returns the decoded provider payload.
+`get` reads the envelope, verifies it, and returns the decoded record for the requested type.
 
 ## CLI
 
@@ -94,44 +95,96 @@ bootstrap = <listen_multiaddr>/p2p/<peer_id>
 
 ### `put`
 
-Publishes a **signed provider update** for `--object-hash` (the DHT key).
+Publishes a **signed record** into the DHT.
 
-Requires an Ed25519 owner private key (`--owner-privkey`) and a strictly monotonic `--seq` per `--object-hash`.
+Usage:
+- `decent-registry put provider ...`
+- `decent-registry put identity ...`
 
-Provider endpoints must be **multiaddrs** starting with `/` (e.g. `/ip4/127.0.0.1/tcp/9000`).
+`decent-registry put --help` lists record types; each record type has its own `--help` output.
 
+#### `put provider`
+
+Publishes a signed **provider update** under `--object-hash` (the DHT key).
+
+Required:
+- `--host`, `--port`, `--bootstrap`
+- `--object-hash <64-hex>`
+- `--provider-id <64-hex>`
+- `--owner-privkey <ed25519_privkey_hex>`
+- `--seq <monotonic int>`
+- `--endpoint <multiaddr>` (repeatable; also accepts comma-separated)
+
+Example:
 ```bash
-decent-registry put \
+decent-registry put provider \
   --host 127.0.0.1 --port <node_port> \
   --bootstrap <bootstrap> \
   --object-hash <64-hex> \
   --provider-id <64-hex> \
-  --owner-privkey <ed25519_privkey_hex_64> \
+  --owner-privkey <ed25519_privkey_hex> \
   --seq 1 \
-  --endpoint <multiaddr> \
-  --endpoint <multiaddr>   # optional (repeatable)
+  --endpoint /ip4/127.0.0.1/tcp/9000
 ```
 
 Notes:
-- `--endpoint` may also be passed comma-separated; endpoints are normalized to lexicographic order before signing.
-- The stored value is a canonical-CBOR signed envelope; verification enforces signature validity and seq monotonicity at overwrite time.
-- The signed-provider path currently has no TTL/expiry fields; TTL/expiry exists only in the legacy JSON `ProviderRecord` API in the DHT layer.
+- `--endpoint` values must start with `/` and are normalized/sorted lexicographically before signing.
+- The stored value is a canonical-CBOR signed envelope; verification enforces signature validity and seq monotonicity.
+
+#### `put identity`
+
+Publishes a signed **identity update** under the DHT key:
+
+- `object_key = sha256(owner_name_bytes)`
+
+Required:
+- `--host`, `--port`, `--bootstrap`
+- `--owner-name <hex bytes>`
+- `--owner-privkey <ed25519_privkey_hex>`
+- `--seq <monotonic int>`
+
+Example:
+```bash
+decent-registry put identity \
+  --host 127.0.0.1 --port <node_port> \
+  --bootstrap <bootstrap> \
+  --owner-name <owner_name_hex> \
+  --owner-privkey <ed25519_privkey_hex> \
+  --seq 1
+```
 
 ### `get`
 
-Resolves `--object-hash` to provider endpoints.
+Resolves a **signed record** from the DHT.
 
-```bash
-decent-registry get \
-  --host 127.0.0.1 --port <node_port> \
-  --bootstrap <bootstrap> \
-  --object-hash <64-hex>
-```
+Usage:
+- `decent-registry get provider ...`
+- `decent-registry get identity ...`
+
+#### `get provider`
+
+Required:
+- `--host`, `--port`, `--bootstrap`
+- `--object-hash <64-hex>`
 
 On success prints JSON:
-- `object_key`: the queried `--object-hash`
-- `provider_id`: value from `--provider-id`
-- `endpoints`: provider endpoints (as provided, normalized/sorted)
+- `object_key`: the queried DHT key
+- `provider_id`
+- `endpoints`: normalized/sorted provider endpoints
+
+On missing prints `not found` and exits non-zero.
+
+#### `get identity`
+
+Required:
+- `--host`, `--port`, `--bootstrap`
+- `--owner-name <hex bytes>` (the DHT key is derived as `sha256(owner_name_bytes)`)
+
+On success prints JSON:
+- `object_key`
+- `owner_name`
+- `owner_public_key`
+- `seq`
 
 On missing prints `not found` and exits non-zero.
 
@@ -147,30 +200,3 @@ print(kp.private_key.to_bytes().hex())
 PY
 ```
 
-### Identity records
-
-Identity record `put`/`get` is not exposed by the current CLI.
-
-#### Intended identity `put` flow (spec)
-
-- Inputs:
-  - `owner_name` (bytes; used for identity lookup key derivation)
-  - `owner_public_key` (Ed25519 public key bytes)
-  - optional `aliases` (from the tagged-union identity schema; excluded from the identity lookup key derivation)
-  - strictly monotonic `seq` per identity lookup key
-- Lookup key derivation:
-  - `object_key = sha256(owner_name_bytes)`
-- SignedUpdate (same canonical CBOR + signature scheme as provider updates):
-  - `record_fields[1] = owner_name` (bytes)
-  - `record_fields[2] = owner_public_key` (bytes)
-  - `payload` is the tagged-union identity payload (issues #11–#14)
-  - `3: seq` in the SignedUpdate
-- Verification/writes:
-  - overwrite acceptance uses signature validity + `seq` strictly increasing per `object_key`
-  - owner binding for identity records is enforced via the `record_fields[1..2]` (current verification layer derives `object_key` from `owner_name` and binds to `owner_public_key`)
-
-#### Intended identity `get` flow (spec)
-
-- Read/verify the stored SignedEnvelope for `object_key = sha256(owner_name_bytes)`.
-- On success return a decoded identity record (owner name, owner public key, and aliases as represented in the tagged-union identity schema).
-- On missing/expired output `not found` and exit non-zero.

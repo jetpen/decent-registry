@@ -134,8 +134,8 @@ class Libp2pKadDHT:
         peer_info = info_from_p2p_addr(Multiaddr(remote_tcp_multiaddr))
         await self._host.connect(peer_info)
 
-    def _kad_key(self, object_hash: str) -> str:
-        return f"/decent-registry/provider/{object_hash}"
+    def _kad_key(self, object_hash: str, *, kind: str = "provider") -> str:
+        return f"/decent-registry/{kind}/{object_hash}"
 
     async def put_provider_record(self, record: ProviderRecord) -> None:
         assert self._dht is not None
@@ -171,6 +171,11 @@ class Libp2pKadDHT:
         kad_key = self._kad_key(object_hash)
 
         # Derive previous seq/owner from the stored envelope (if any).
+        #
+        # The overwrite check needs the previous owner's concrete Ed25519 public key
+        # for the *record kind* (provider vs identity). The signed update verifier
+        # can derive the right owner binding, but this DHT adapter has to seed
+        # seq monotonicity with the previous owner.
         prev: SeqStateEntry | None = None
         raw_existing = await self._dht.get_value(kad_key, quorum=0)
         if raw_existing is not None:
@@ -183,8 +188,25 @@ class Libp2pKadDHT:
                 )
                 seq = existing_signed_update[3]
                 record_fields = existing_signed_update[1]
-                # Provider record: record_fields[1] = owner_public_key bytes.
-                owner_public_key = bytes(record_fields[1])
+
+                # Identity record: record_fields[1]=owner_name bytes, record_fields[2]=owner_public_key bytes.
+                if (
+                    isinstance(record_fields, dict)
+                    and 1 in record_fields
+                    and 2 in record_fields
+                    and isinstance(record_fields[2], (bytes, bytearray))
+                ):
+                    owner_public_key = bytes(record_fields[2])
+                # Provider record: record_fields[1]=owner_public_key bytes.
+                elif (
+                    isinstance(record_fields, dict)
+                    and 1 in record_fields
+                    and isinstance(record_fields[1], (bytes, bytearray))
+                ):
+                    owner_public_key = bytes(record_fields[1])
+                else:
+                    raise ValueError("unrecognized record_fields shape")
+
                 prev = SeqStateEntry(
                     owner_public_key=owner_public_key,
                     seq=int(seq),
@@ -206,6 +228,104 @@ class Libp2pKadDHT:
         )
 
         await self._dht.put_value(kad_key, envelope_cbor)
+
+    async def put_signed_identity_record(
+        self, object_key_hex: str, envelope_cbor: bytes
+    ) -> None:
+        """Store a CBOR signed identity update under the identity namespace."""
+        assert self._dht is not None
+
+        record_key = bytes.fromhex(object_key_hex)
+        kad_key = self._kad_key(object_key_hex, kind="identity")
+
+        # Seed seq monotonicity enforcement with the previous identity owner's
+        # public key, if an entry already exists.
+        prev: SeqStateEntry | None = None
+        raw_existing = await self._dht.get_value(kad_key, quorum=0)
+        if raw_existing is not None:
+            try:
+                existing_signed_update_bytes, _existing_signature = decode_signed_envelope(
+                    raw_existing
+                )
+                existing_signed_update = decode_canonical_signed_update(
+                    existing_signed_update_bytes
+                )
+                seq = existing_signed_update[3]
+                record_fields = existing_signed_update[1]
+
+                # Identity record: record_fields[1]=owner_name bytes, record_fields[2]=owner_public_key bytes.
+                if (
+                    isinstance(record_fields, dict)
+                    and 2 in record_fields
+                    and isinstance(record_fields[2], (bytes, bytearray))
+                ):
+                    owner_public_key = bytes(record_fields[2])
+                else:
+                    raise ValueError("unrecognized identity record_fields shape")
+
+                prev = SeqStateEntry(
+                    owner_public_key=owner_public_key,
+                    seq=int(seq),
+                )
+            except Exception:
+                prev = None
+
+        seq_state: dict[bytes, SeqStateEntry] = {}
+        if prev is not None:
+            seq_state[record_key] = prev
+
+        signed_update_bytes, signature = decode_signed_envelope(envelope_cbor)
+        validate_signed_update_overwrite(
+            record_key=record_key,
+            signed_update_bytes_canonical=signed_update_bytes,
+            signature=signature,
+            seq_state=seq_state,
+            update_state_on_success=False,
+        )
+
+        await self._dht.put_value(kad_key, envelope_cbor)
+
+    async def get_signed_identity_record(
+        self, object_key_hex: str, quorum: int = 0
+    ) -> dict[str, Any] | None:
+        """Retrieve and verify an identity record under the DHT key."""
+        assert self._dht is not None
+
+        record_key = bytes.fromhex(object_key_hex)
+        kad_key = self._kad_key(object_key_hex, kind="identity")
+        raw = await self._dht.get_value(kad_key, quorum=quorum)
+        if raw is None:
+            return None
+
+        try:
+            signed_update_bytes, signature = decode_signed_envelope(raw)
+            validate_signed_update_overwrite(
+                record_key=record_key,
+                signed_update_bytes_canonical=signed_update_bytes,
+                signature=signature,
+                seq_state={},
+                update_state_on_success=False,
+            )
+
+            signed_update = decode_canonical_signed_update(signed_update_bytes)
+            record_fields = signed_update[1]
+            seq = signed_update[3]
+
+            owner_name_bytes = record_fields.get(1)
+            owner_pub_bytes = record_fields.get(2)
+            if not isinstance(owner_name_bytes, (bytes, bytearray)):
+                return None
+            if not isinstance(owner_pub_bytes, (bytes, bytearray)):
+                return None
+
+            return {
+                "object_key": object_key_hex,
+                "owner_name": bytes(owner_name_bytes).hex(),
+                "owner_public_key": bytes(owner_pub_bytes).hex(),
+                "seq": int(seq),
+            }
+        except Exception:
+            return None
 
     async def get_signed_provider_record(
         self, object_hash: str, quorum: int = 0
