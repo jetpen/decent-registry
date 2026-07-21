@@ -17,6 +17,9 @@ from decent_registry.verification import (
 )
 
 
+PROVIDER_URL = "https://example.com/object.bin"
+
+
 def _sha256(data: bytes) -> bytes:
     return hashlib.sha256(data).digest()
 
@@ -270,7 +273,7 @@ def test_valid_provider_overwrite():
         alg="Ed25519",
         version=1,
         object_hash=object_hash_hex,
-        provider_id="02" * 32,
+        provider_url=PROVIDER_URL,
         endpoints=endpoints,
     )
 

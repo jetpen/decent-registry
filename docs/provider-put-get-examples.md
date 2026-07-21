@@ -12,13 +12,8 @@
 DHT key is the literal `--object-hash` value (64 hex chars).
 
 - `put provider` stores a canonical signed envelope under:
-
-  `/decent-registry/provider/{object_hash}`
-
+  - `/decent-registry/provider/{object_hash}`
 - `get provider` queries the same DHT key.
-
-In code: `src/decent_registry/dht/libp2p_dht.py` uses:
-- `kad_key = f"/decent-registry/provider/{object_hash}"` for provider records.
 
 ---
 
@@ -28,40 +23,30 @@ In code: `src/decent_registry/dht/libp2p_dht.py` uses:
 
 ```bash
 # 1) Generate a signing key (once)
+
 decent-registry keygen --output ~/.decent/owner_privkey.pem
 
 # 2) Download an example artifact and compute its SHA-256 object hash
+
 curl -LO https://github.com/curl/curl/releases/download/curl-8_7_1/curl-8.7.1.tar.gz
 OBJECT_HASH="$(sha256sum curl-8.7.1.tar.gz | awk '{print $1}')"
 # OBJECT_HASH must equal:
 # f91249c87f68ea00cf27c44fdfa5a78423e41e71b7d408e5901a9896d905c495
 
-# 3) Derive provider_id = Ed25519 public key hex (64 lowercase hex chars) from the PEM
-PROVIDER_ID="$(python3 - <<'PY'
-import os
-from cryptography.hazmat.primitives.serialization import (
-    load_pem_private_key,
-    Encoding,
-    PublicFormat,
-)
+# 3) Provide the downloadable object URL itself (field 4 in the provider payload)
 
-pem_path = os.path.expanduser('~/.decent/owner_privkey.pem')
-with open(pem_path, 'rb') as f:
-    priv = load_pem_private_key(f.read(), password=None)
-
-pub = priv.public_key()
-print(pub.public_bytes(Encoding.Raw, PublicFormat.Raw).hex())
-PY
-)"
+PROVIDER_URL="https://github.com/curl/curl/releases/download/curl-8_7_1/curl-8.7.1.tar.gz"
 
 # Put seq=1
+
 # Note: --bootstrap must be an identify-style multiaddr containing /p2p/<peerid>.
+
 decent-registry put provider \
   --host 127.0.0.1 \
   --port <CLIENT_PORT> \
   --bootstrap <SEED_LISTEN_MULTIADDR>/p2p/<SEED_PEERID> \
   --object-hash "$OBJECT_HASH" \
-  --provider-id "$PROVIDER_ID" \
+  --provider-url "$PROVIDER_URL" \
   --owner-privkey ~/.decent/owner_privkey.pem \
   --seq 1 \
   --endpoint /ip4/127.0.0.1/tcp/9000
@@ -85,10 +70,11 @@ So: the payload committed to the signature always uses `endpoints = sorted(endpo
 - `--host`/`--port` in `put provider` / `get provider` define the client’s temporary libp2p node listen address used to join the Kad-DHT (via `--bootstrap`).
 - `--endpoint` values are the provider’s advertised service locations (multiaddrs) stored in the provider record payload and returned by `get provider`.
 
-### What `provider_id` represents
+### What `provider_url` represents
 
-- `provider_id` is stored in the provider payload as field `4`.
-- In this repo’s current docs, `provider_id` is intended to be a 64-hex identifier corresponding to the Ed25519 provider identity (64 hex chars), and it should match the provider’s `--owner-privkey` signing key material.
+- `provider_url` is stored in the provider payload as field `4`.
+- It is the downloadable object URL (must be `http://` or `https://`).
+- It is validated to be ≤ 2048 UTF-8 bytes.
 
 ---
 
@@ -97,6 +83,7 @@ So: the payload committed to the signature always uses `endpoints = sorted(endpo
 ### Minimal invocation
 
 ```bash
+
 decent-registry get provider \
   --host 127.0.0.1 \
   --port <CLIENT_PORT> \
@@ -111,34 +98,24 @@ On success, stdout is a single JSON object (`json.dumps(..., indent=2, sort_keys
 ```json
 {
   "object_key": "f91249c87f68ea00cf27c44fdfa5a78423e41e71b7d408e5901a9896d905c495",
-  "provider_id": "<PROVIDER_ID_ED25519_PUBKEY_HEX>",
-  "endpoints": ["<multiaddr>", ...] 
+  "provider_url": "<URL>",
+  "endpoints": ["<multiaddr>", ...]
 }
 ```
 
 - `endpoints` are returned in the normalized/sorted form.
 
-On missing, stdout is:
-- `not found`
-
-and the command exits non-zero.
+On missing, stdout is `not found` and the command exits non-zero.
 
 ---
 
 ## Seq monotonic overwrite and owner collision rules
 
-From `src/decent_registry/verification.py` (via `RecordValidator.validate_provider_overwrite`): for a fixed provider DHT key (= `object_hash`):
+For a fixed provider DHT key (= `object_hash`):
 
 - `seq` must be **strictly increasing** (`seq <= prev.seq` is rejected).
 - An overwrite is rejected if the signer’s `owner_public_key` changes ("owner collision").
 - Canonical CBOR + signature validity are required.
-
-Concretely:
-
-1. `put provider --seq 1` succeeds.
-2. `put provider --seq 2` succeeds.
-3. `put provider --seq 1` (or any `<= prev.seq`) is rejected (non-zero exit).
-4. `get provider` returns the latest accepted `seq`’s payload.
 
 ---
 
@@ -162,21 +139,20 @@ import queue
 import shutil
 import socket
 import subprocess
-import sys
 import tempfile
 import threading
 import trio
-import hashlib
 
 from pathlib import Path
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import (
     Encoding,
     NoEncryption,
     PrivateFormat,
 )
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from libp2p.crypto.ed25519 import create_new_key_pair
+from decent_registry.dht.libp2p_dht import Libp2pKadDHT
 
 
 def free_port() -> int:
@@ -207,7 +183,7 @@ def start_seed(seed_port: int, alive_seconds: float = 25.0):
     return t, bootstrap
 
 
-def write_privkey_pem(tmpdir: Path) -> tuple[Path, str]:
+def write_privkey_pem(tmpdir: Path) -> Path:
     kp = create_new_key_pair()
     seed = kp.private_key.to_bytes()  # 32-byte Ed25519 seed
 
@@ -221,27 +197,19 @@ def write_privkey_pem(tmpdir: Path) -> tuple[Path, str]:
     pem_path = tmpdir / "owner_privkey.pem"
     pem_path.write_bytes(pem_bytes)
     os.chmod(pem_path, 0o600)
-    provider_id_hex = kp.public_key.to_bytes().hex()
-    return pem_path, provider_id_hex
+    return pem_path
 
 
-# Import after defining functions (keeps imports visible in the snippet)
-from decent_registry.dht.libp2p_dht import Libp2pKadDHT
-
-# Prefer the project venv (avoids collisions with other venvs on PATH).
 exe_path = Path.cwd() / ".venv" / "bin" / "decent-registry"
 if exe_path.exists():
     exe = str(exe_path)
 else:
     exe = shutil.which("decent-registry")
     if not exe:
-        raise RuntimeError(
-            "decent-registry not found. Run from repo root with the project venv: "
-            "cd <repo-root> && . .venv/bin/activate"
-        )
+        raise RuntimeError("decent-registry not found; activate .venv first")
 
 obj = "f91249c87f68ea00cf27c44fdfa5a78423e41e71b7d408e5901a9896d905c495"
-# provider_id is derived from the generated keypair public key in write_privkey_pem()
+provider_url = "https://github.com/curl/curl/releases/download/curl-8_7_1/curl-8.7.1.tar.gz"
 
 endpoints = [
     "/ip4/127.0.0.1/tcp/10002",
@@ -260,15 +228,10 @@ with tempfile.TemporaryDirectory() as td:
     client_port_3 = free_port()
     client_port_get = free_port()
 
-    owner_priv_pem_path, provider_id = write_privkey_pem(tmpdir)
+    owner_priv_pem_path = write_privkey_pem(tmpdir)
 
     def run_cli(args):
-        cp = subprocess.run(
-            [exe] + args,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        cp = subprocess.run([exe] + args, capture_output=True, text=True, timeout=60)
         return cp
 
     put1 = run_cli([
@@ -278,7 +241,7 @@ with tempfile.TemporaryDirectory() as td:
         "--port", str(client_port_1),
         "--bootstrap", seed_bootstrap,
         "--object-hash", obj,
-        "--provider-id", provider_id,
+        "--provider-url", provider_url,
         "--owner-privkey", str(owner_priv_pem_path),
         "--seq", "1",
         "--endpoint", ",".join(endpoints),
@@ -292,13 +255,14 @@ with tempfile.TemporaryDirectory() as td:
         "--port", str(client_port_2),
         "--bootstrap", seed_bootstrap,
         "--object-hash", obj,
-        "--provider-id", provider_id,
+        "--provider-url", provider_url,
         "--owner-privkey", str(owner_priv_pem_path),
         "--seq", "2",
         "--endpoint", ",".join(endpoints),
     ])
     assert put2.returncode == 0, (put2.stdout, put2.stderr)
 
+    # Attempt overwrite with lower seq; should be rejected.
     put3 = run_cli([
         "put",
         "provider",
@@ -306,7 +270,7 @@ with tempfile.TemporaryDirectory() as td:
         "--port", str(client_port_3),
         "--bootstrap", seed_bootstrap,
         "--object-hash", obj,
-        "--provider-id", provider_id,
+        "--provider-url", provider_url,
         "--owner-privkey", str(owner_priv_pem_path),
         "--seq", "1",
         "--endpoint", ",".join(endpoints),
@@ -325,13 +289,9 @@ with tempfile.TemporaryDirectory() as td:
 
     record = json.loads(get1.stdout)
     assert record["object_key"] == obj
-    assert record["provider_id"] == provider_id
+    assert record["provider_url"] == provider_url
     assert record["endpoints"] == expected_endpoints
 
     print(json.dumps(record, indent=2, sort_keys=True))
 PY
 ```
-
----
-
-

@@ -179,7 +179,7 @@ def _put_provider_command(args: argparse.Namespace) -> int:
             service = RegistryService(dht=dht)
             await service.put_provider(
                 object_hash=args.object_hash,
-                provider_id=args.provider_id,
+                provider_url=args.provider_url,
                 owner_privkey_pem_path=args.owner_privkey,
                 seq=int(args.seq),
                 endpoints=endpoints,
@@ -229,7 +229,7 @@ def _get_provider_command(args: argparse.Namespace) -> int:
 
             payload = {
                 "object_key": args.object_hash,
-                "provider_id": provider_payload.provider_id,
+                "provider_url": provider_payload.provider_url,
                 "endpoints": provider_payload.endpoints,
             }
             print(json.dumps(payload, indent=2, sort_keys=True))
@@ -349,7 +349,7 @@ def main(argv: list[str] | None = None) -> None:
             "Publish a signed provider record under `--object-hash` (DHT key).\n\n"
             "Required:\n"
             "- --object-hash <64-hex>\n"
-            "- --provider-id <64-hex>\n"
+            "- --provider-url <url>\n"
             "- --owner-privkey <owner_privkey_pem_path>\n"
             "- --seq <monotonic int>\n\n"
             "Optional:\n"
@@ -365,7 +365,7 @@ def main(argv: list[str] | None = None) -> None:
     _add_network_args(put_provider_p)
     _add_datastore_args(put_provider_p)
     put_provider_p.add_argument("--object-hash", dest="object_hash", required=True)
-    put_provider_p.add_argument("--provider-id", required=True)
+    put_provider_p.add_argument("--provider-url", dest="provider_url", required=True)
     put_provider_p.add_argument(
         "--owner-privkey",
         dest="owner_privkey",

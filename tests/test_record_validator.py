@@ -15,6 +15,9 @@ from decent_registry.verification import (
 )
 
 
+PROVIDER_URL = "https://example.com/object.bin"
+
+
 def _sha256(data: bytes) -> bytes:
     return hashlib.sha256(data).digest()
 
@@ -68,7 +71,7 @@ def test_validate_provider_overwrite_with_prev_seq_allows_increase():
         alg="Ed25519",
         version=1,
         object_hash=object_hash_hex,
-        provider_id="02" * 32,
+        provider_url=PROVIDER_URL,
         endpoints=endpoints,
     )
 
@@ -118,7 +121,7 @@ def test_validate_provider_overwrite_rejects_old_seq():
         alg="Ed25519",
         version=1,
         object_hash=object_hash_hex,
-        provider_id="02" * 32,
+        provider_url=PROVIDER_URL,
         endpoints=["/ip4/1/tcp/1"],
     )
 
@@ -234,7 +237,7 @@ def test_validate_provider_get_returns_decoded_provider_payload():
         alg="Ed25519",
         version=1,
         object_hash=object_hash_hex,
-        provider_id="02" * 32,
+        provider_url=PROVIDER_URL,
         endpoints=endpoints,
     )
 
@@ -254,7 +257,7 @@ def test_validate_provider_get_returns_decoded_provider_payload():
     payload = v.validate_provider_get(record_key=record_key, envelope_cbor=env)
 
     assert payload.object_hash == object_hash_hex
-    assert payload.provider_id == "02" * 32
+    assert payload.provider_url == PROVIDER_URL
     # Provider schema normalizes/sorts endpoints.
     assert payload.endpoints == sorted(endpoints)
 
@@ -270,7 +273,7 @@ def test_validate_provider_overwrite_rejects_lookup_key_mismatch():
         alg="Ed25519",
         version=1,
         object_hash=object_hash_hex,
-        provider_id="02" * 32,
+        provider_url=PROVIDER_URL,
         endpoints=["/ip4/1/tcp/1"],
     )
 
@@ -305,7 +308,7 @@ def test_validate_provider_get_rejects_noncanonical_envelope():
         alg="Ed25519",
         version=1,
         object_hash=object_hash_hex,
-        provider_id="02" * 32,
+        provider_url=PROVIDER_URL,
         endpoints=["/ip4/1/tcp/1"],
     )
 

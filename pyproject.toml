@@ -28,3 +28,7 @@ decent-registry = "decent_registry.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "acceptance: network/internet-dependent end-to-end tests",
+]
+

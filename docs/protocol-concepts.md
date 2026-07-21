@@ -129,12 +129,12 @@ Stored as a SignedUpdate where:
   - `1`: `alg` (currently `Ed25519`)
   - `2`: `version` (uint)
   - `3`: `object_hash` (64-hex string)
-  - `4`: `provider_id` (64-hex string)
+  - `4`: `provider_url` (downloadable object URL, max 2048 UTF-8 bytes)
   - `5`: `endpoints` (list<string>, sorted)
 
 On get, the client prints:
 - `object_key` (the queried `object_hash` string)
-- `provider_id`
+- `provider_url`
 - `endpoints` (already validated/sorted)
 
 ---
@@ -284,7 +284,7 @@ Client CLI flags common to `put`/`get`:
 
 - Inputs:
   - `--object-hash <64-hex>`
-  - `--provider-id <64-hex>`
+  - `--provider-url <url>`
   - `--owner-privkey <pem path>`
   - `--seq <monotonic int>`
   - `--endpoint <multiaddr>` (repeatable/comma-separated)
@@ -298,4 +298,4 @@ Client CLI flags common to `put`/`get`:
 - Inputs:
   - `--object-hash <64-hex>`
 - Output JSON:
-  - `provider_id` and sorted `endpoints`
+  - `provider_url` and sorted `endpoints`

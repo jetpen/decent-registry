@@ -51,7 +51,7 @@ class RegistryService:
         self,
         *,
         object_hash: str,
-        provider_id: str,
+        provider_url: str,
         owner_privkey_pem_path: str,
         seq: int,
         endpoints: list[str],
@@ -66,7 +66,7 @@ class RegistryService:
             alg=alg,
             version=version,
             object_hash=object_hash,
-            provider_id=provider_id,
+            provider_url=provider_url,
             endpoints=endpoints,
         )
         record_fields: dict[int, Any] = {1: owner_pub_bytes}

@@ -15,7 +15,7 @@ from decent_registry.dht.libp2p_dht import Libp2pKadDHT
 @pytest.mark.trio
 async def test_kad_dht_put_get_two_nodes():
     obj_hash = "d" * 64
-    provider_id = "p1"
+    provider_url = "https://example.com/object.bin"
 
     # Endpoints are lexicographically sorted before signing.
     endpoints_unsorted = ["/ip4/127.0.0.1/tcp/2", "/ip4/127.0.0.1/tcp/1"]
@@ -29,7 +29,7 @@ async def test_kad_dht_put_get_two_nodes():
         alg="Ed25519",
         version=1,
         object_hash=obj_hash,
-        provider_id=provider_id,
+        provider_url=provider_url,
         endpoints=endpoints_unsorted,
     )
     signed_update_bytes = encode_signed_update(
@@ -65,5 +65,5 @@ async def test_kad_dht_put_get_two_nodes():
         got = await dht2.get_signed_provider_record(obj_hash)
         assert got is not None
         assert got.object_hash == obj_hash
-        assert got.provider_id == provider_id
+        assert got.provider_url == provider_url
         assert got.endpoints == endpoints_sorted

@@ -98,12 +98,15 @@ def _write_ed25519_privkey_pem(tmp_path, *, filename: str = "owner_privkey.pem")
     return str(path), owner_pub_hex
 
 
+PROVIDER_URL = "https://example.com/object.bin"
+
+
 def test_cli_put_get_round_trip_libp2p_kad_dht(tmp_path):
     seed_port = _free_port()
     _, seed_bootstrap = _start_libp2p_seed(seed_port, alive_seconds=12.0)
 
     obj = "f" * 64
-    provider_id = "a" * 64
+    provider_url = PROVIDER_URL
     owner_priv_pem_path, _ = _write_ed25519_privkey_pem(tmp_path)
 
     endpoints = ["/ip4/127.0.0.1/tcp/9999"]
@@ -120,8 +123,8 @@ def test_cli_put_get_round_trip_libp2p_kad_dht(tmp_path):
             seed_bootstrap,
             "--object-hash",
             obj,
-            "--provider-id",
-            provider_id,
+            "--provider-url",
+            provider_url,
             "--owner-privkey",
             owner_priv_pem_path,
             "--seq",
@@ -150,7 +153,7 @@ def test_cli_put_get_round_trip_libp2p_kad_dht(tmp_path):
 
     record = json.loads(get_res.stdout)
     assert record["object_key"] == obj
-    assert record["provider_id"] == provider_id
+    assert record["provider_url"] == provider_url
     assert record["endpoints"] == _normalize_endpoints(endpoints)
 
 
@@ -159,7 +162,7 @@ def test_cli_seq_monotonic_overwrite_libp2p_kad_dht(tmp_path):
     _, seed_bootstrap = _start_libp2p_seed(seed_port, alive_seconds=20.0)
 
     obj = "e" * 64
-    provider_id = "b" * 64
+    provider_url = PROVIDER_URL
     owner_priv_pem_path, _ = _write_ed25519_privkey_pem(tmp_path)
 
     endpoints_1 = ["/ip4/127.0.0.1/tcp/10001"]
@@ -178,8 +181,8 @@ def test_cli_seq_monotonic_overwrite_libp2p_kad_dht(tmp_path):
             seed_bootstrap,
             "--object-hash",
             obj,
-            "--provider-id",
-            provider_id,
+            "--provider-url",
+            provider_url,
             "--owner-privkey",
             owner_priv_pem_path,
             "--seq",
@@ -202,8 +205,8 @@ def test_cli_seq_monotonic_overwrite_libp2p_kad_dht(tmp_path):
             seed_bootstrap,
             "--object-hash",
             obj,
-            "--provider-id",
-            provider_id,
+            "--provider-url",
+            provider_url,
             "--owner-privkey",
             owner_priv_pem_path,
             "--seq",
@@ -227,8 +230,8 @@ def test_cli_seq_monotonic_overwrite_libp2p_kad_dht(tmp_path):
             seed_bootstrap,
             "--object-hash",
             obj,
-            "--provider-id",
-            provider_id,
+            "--provider-url",
+            provider_url,
             "--owner-privkey",
             owner_priv_pem_path,
             "--seq",
@@ -257,7 +260,7 @@ def test_cli_seq_monotonic_overwrite_libp2p_kad_dht(tmp_path):
 
     record = json.loads(get_res.stdout)
     assert record["object_key"] == obj
-    assert record["provider_id"] == provider_id
+    assert record["provider_url"] == provider_url
     assert record["endpoints"] == _normalize_endpoints(endpoints_2)
 
 

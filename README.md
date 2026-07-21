@@ -58,7 +58,7 @@ Publishes a signed **provider update** under `--object-hash` (the DHT key).
 Required:
 - `--host`, `--port`, `--bootstrap`
 - `--object-hash <64-hex>`
-- `--provider-id <64-hex>`
+- `--provider-url <url>`
 - `--owner-privkey <owner_privkey_pem_path>`
 - `--seq <monotonic int>`
 - `--endpoint <multiaddr>` (repeatable; also accepts comma-separated)
@@ -69,7 +69,7 @@ decent-registry put provider \
   --host 127.0.0.1 --port <node_port> \
   --bootstrap <bootstrap> \
   --object-hash <64-hex> \
-  --provider-id <64-hex> \
+  --provider-url <url> \
   --owner-privkey <owner_privkey_pem_path> \
   --seq 1 \
   --endpoint /ip4/127.0.0.1/tcp/9000
@@ -117,7 +117,7 @@ Required:
 
 On success prints JSON:
 - `object_key`: the queried DHT key
-- `provider_id`
+- `provider_url`
 - `endpoints`: normalized/sorted provider endpoints
 
 On missing prints `not found` and exits non-zero.

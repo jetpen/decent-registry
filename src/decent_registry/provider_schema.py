@@ -12,7 +12,6 @@ def _validate_endpoints(endpoints: Iterable[str]) -> list[str]:
     eps = list(endpoints)
     if len(eps) > 32:
         raise ValueError(f"endpoints max 32; got {len(eps)}")
-
     out: list[str] = []
     for e in eps:
         if not isinstance(e, str):
@@ -24,13 +23,11 @@ def _validate_endpoints(endpoints: Iterable[str]) -> list[str]:
         if len(e.encode("utf-8")) > 256:
             raise ValueError("endpoint max 256 bytes")
         out.append(e)
-
     return out
 
 
 def normalize_sorted_endpoints(endpoints: Iterable[str]) -> list[str]:
     """Validate endpoint constraints and return lexicographically sorted endpoints."""
-
     eps = _validate_endpoints(endpoints)
     return sorted(eps)
 
@@ -42,12 +39,26 @@ def _require_endpoints_sorted(endpoints: list[str]) -> None:
         )
 
 
+def _validate_object_url(url: str) -> str:
+    if not isinstance(url, str):
+        raise TypeError(f"object_url must be str; got {type(url)}")
+    if not url:
+        raise ValueError("object_url must be non-empty")
+    if any(c.isspace() for c in url):
+        raise ValueError("object_url must not contain whitespace")
+    if not (url.startswith("http://") or url.startswith("https://")):
+        raise ValueError("object_url must start with http:// or https://")
+    if len(url.encode("utf-8")) > 2048:
+        raise ValueError("object_url max 2048 bytes")
+    return url
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderPayloadV1:
     alg: str
     version: int
     object_hash: str
-    provider_id: str
+    provider_url: str
     endpoints: list[str]
 
 
@@ -59,7 +70,7 @@ _PROVIDER_PAYLOAD_FIELDS = {1, 2, 3, 4, 5}
 _FIELD_ALG = 1
 _FIELD_VERSION = 2
 _FIELD_OBJECT_HASH = 3
-_FIELD_PROVIDER_ID = 4
+_FIELD_PROVIDER_URL = 4
 _FIELD_ENDPOINTS = 5
 
 
@@ -68,21 +79,21 @@ def build_provider_payload_dict(
     alg: str,
     version: int,
     object_hash: str,
-    provider_id: str,
+    provider_url: str,
     endpoints: list[str],
 ) -> dict[int, Any]:
     """Build the in-memory payload dict for the provider signed-field list."""
-
     if not isinstance(version, int) or version < 0:
         raise TypeError("version must be a non-negative int")
 
     norm_eps = normalize_sorted_endpoints(endpoints)
+    provider_url = _validate_object_url(provider_url)
 
     return {
         _FIELD_ALG: alg,
         _FIELD_VERSION: int(version),
         _FIELD_OBJECT_HASH: object_hash,
-        _FIELD_PROVIDER_ID: provider_id,
+        _FIELD_PROVIDER_URL: provider_url,
         _FIELD_ENDPOINTS: norm_eps,
     }
 
@@ -104,15 +115,19 @@ def decode_provider_payload_dict(payload: Mapping[int, Any]) -> ProviderPayloadV
         isinstance(x, str) for x in endpoints
     ):
         raise ValueError("endpoints must be list[str]")
-
     endpoints = _validate_endpoints(endpoints)
     _require_endpoints_sorted(endpoints)
+
+    provider_url_raw = payload[_FIELD_PROVIDER_URL]
+    if not isinstance(provider_url_raw, str):
+        raise ValueError("object_url must be str")
+    provider_url = _validate_object_url(provider_url_raw)
 
     return ProviderPayloadV1(
         alg=str(payload[_FIELD_ALG]),
         version=int(payload[_FIELD_VERSION]),
         object_hash=str(payload[_FIELD_OBJECT_HASH]),
-        provider_id=str(payload[_FIELD_PROVIDER_ID]),
+        provider_url=provider_url,
         endpoints=endpoints,
     )
 
@@ -122,16 +137,15 @@ def encode_provider_payload(
     alg: str,
     version: int,
     object_hash: str,
-    provider_id: str,
+    provider_url: str,
     endpoints: list[str],
 ) -> bytes:
     """Canonical CBOR encode of the provider signed-field list payload."""
-
     payload_dict = build_provider_payload_dict(
         alg=alg,
         version=version,
         object_hash=object_hash,
-        provider_id=provider_id,
+        provider_url=provider_url,
         endpoints=endpoints,
     )
     return canonical_cbor(payload_dict)
@@ -154,10 +168,15 @@ def decode_provider_payload(data: bytes) -> ProviderPayloadV1:
     return decode_provider_payload_dict(decoded)
 
 
-def format_get_result(*, object_key: str, endpoints: list[str]) -> dict[str, Any]:
+def format_get_result(
+    *,
+    object_key: str,
+    provider_url: str,
+    endpoints: list[str],
+) -> dict[str, Any]:
     """Minimal JSON-API formatting for `get(object_hash)` results (issue #23)."""
-
     return {
         "object_key": object_key,
+        "provider_url": provider_url,
         "endpoints": normalize_sorted_endpoints(endpoints),
     }
