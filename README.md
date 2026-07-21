@@ -258,4 +258,5 @@ twine upload dist/*
 See also:
 - `docs/identity-put-get-examples.md` for a runnable end-to-end `put identity` / `get identity` example.
 - `docs/provider-put-get-examples.md` for a runnable end-to-end `put provider` / `get provider` example.
+- `docs/single-node-server-setup.md` for a copy-pasteable single-node `decent-registry node` startup + bootstrap derivation.
 
