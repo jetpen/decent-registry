@@ -259,4 +259,5 @@ See also:
 - `docs/identity-put-get-examples.md` for a runnable end-to-end `put identity` / `get identity` example.
 - `docs/provider-put-get-examples.md` for a runnable end-to-end `put provider` / `get provider` example.
 - `docs/single-node-server-setup.md` for a copy-pasteable single-node `decent-registry node` startup + bootstrap derivation.
+- `docs/multi-node-cluster-setup.md` for a 2-node example where node2 bootstraps to node1 (Kad-DHT discovery).
 
