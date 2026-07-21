@@ -198,4 +198,62 @@ decent-registry keygen [--output <path>]
 
 CLI must receive the path to this PEM file. Private key contents must never be echoed or logged.
 
+## Development
+
+### Virtual environment / dependency install
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+
+pip install -U pip
+pip install -e .[dev]
+```
+
+`.venv/` is ignored by Git (see `.gitignore`).
+
+### Build the server and CLI
+
+There is no separate build step: the CLI entry point is defined in `pyproject.toml` as:
+
+- `decent-registry = "decent_registry.cli:main"`
+
+After `pip install -e .[dev]`, the `decent-registry` executable is available from your shell.
+
+### Running tests
+
+```bash
+pytest -q
+```
+
+Test discovery is configured in `pyproject.toml` via `testpaths = ["tests"]`.
+
+### Packaging and release
+
+Build artifacts:
+
+```bash
+pip install build twine
+python -m build
+```
+
+This writes distributions to `dist/`.
+
+(Optional) Publish to PyPI:
+
+```bash
+twine upload dist/*
+```
+
+### Repository organization
+
+- `src/decent_registry/`: main package source (CLI, DHT adapter, signing/verification, schemas)
+- `tests/`: pytest test suite
+- `docs/`: project documentation
+- `pyproject.toml`: build metadata + dependencies + pytest config
+- `AGENTS.md`: agent coordination rules for this repo
+- `README.md`: this document
+- `.gitignore`: ignored paths (notably `.venv/`, `build/`, `dist/`, LMDB scratch)
+
+See also: `docs/identity-put-get-examples.md` for a runnable end-to-end `put identity` / `get identity` example.
 
