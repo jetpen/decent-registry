@@ -255,5 +255,7 @@ twine upload dist/*
 - `README.md`: this document
 - `.gitignore`: ignored paths (notably `.venv/`, `build/`, `dist/`, LMDB scratch)
 
-See also: `docs/identity-put-get-examples.md` for a runnable end-to-end `put identity` / `get identity` example.
+See also:
+- `docs/identity-put-get-examples.md` for a runnable end-to-end `put identity` / `get identity` example.
+- `docs/provider-put-get-examples.md` for a runnable end-to-end `put provider` / `get provider` example.
 
