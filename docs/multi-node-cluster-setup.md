@@ -54,7 +54,7 @@ Run node1 (keep it running):
 
 ```bash
 # -v forces INFO logging so you can capture the startup line
-decent-registry node --config ~/.decent/registry-node1.yaml -v
+decent-registry -v node --config ~/.decent/registry-node1.yaml
 ```
 
 At startup, capture the logged values:
@@ -101,7 +101,7 @@ YAML
 Run node2 (keep it running):
 
 ```bash
-decent-registry node --config ~/.decent/registry-node2.yaml -v
+decent-registry -v node --config ~/.decent/registry-node2.yaml
 ```
 
 Expected behavior:

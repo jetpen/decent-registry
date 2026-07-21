@@ -32,7 +32,7 @@ Runs a libp2p Kad-DHT node.
 Example (seed node, run until Ctrl-C):
 
 ```bash
-decent-registry node --host 127.0.0.1 --port 9000 -v
+decent-registry -v node --host 127.0.0.1 --port 9000
 ```
 
 To form a bootstrap destination from this output:
