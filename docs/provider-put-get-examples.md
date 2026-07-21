@@ -27,8 +27,32 @@ In code: `src/decent_registry/dht/libp2p_dht.py` uses:
 ### Minimal invocation
 
 ```bash
-# Generate a signing key (once)
+# 1) Generate a signing key (once)
 decent-registry keygen --output ~/.decent/owner_privkey.pem
+
+# 2) Download an example artifact and compute its SHA-256 object hash
+curl -LO https://github.com/curl/curl/releases/download/curl-8_7_1/curl-8.7.1.tar.gz
+OBJECT_HASH="$(sha256sum curl-8.7.1.tar.gz | awk '{print $1}')"
+# OBJECT_HASH must equal:
+# f91249c87f68ea00cf27c44fdfa5a78423e41e71b7d408e5901a9896d905c495
+
+# 3) Derive provider_id = Ed25519 public key hex (64 lowercase hex chars) from the PEM
+PROVIDER_ID="$(python3 - <<'PY'
+import os
+from cryptography.hazmat.primitives.serialization import (
+    load_pem_private_key,
+    Encoding,
+    PublicFormat,
+)
+
+pem_path = os.path.expanduser('~/.decent/owner_privkey.pem')
+with open(pem_path, 'rb') as f:
+    priv = load_pem_private_key(f.read(), password=None)
+
+pub = priv.public_key()
+print(pub.public_bytes(Encoding.Raw, PublicFormat.Raw).hex())
+PY
+)"
 
 # Put seq=1
 # Note: --bootstrap must be an identify-style multiaddr containing /p2p/<peerid>.
@@ -36,8 +60,8 @@ decent-registry put provider \
   --host 127.0.0.1 \
   --port <CLIENT_PORT> \
   --bootstrap <SEED_LISTEN_MULTIADDR>/p2p/<SEED_PEERID> \
-  --object-hash <OBJECT_HASH_64HEX> \
-  --provider-id <PROVIDER_ID_64HEX> \
+  --object-hash "$OBJECT_HASH" \
+  --provider-id "$PROVIDER_ID" \
   --owner-privkey ~/.decent/owner_privkey.pem \
   --seq 1 \
   --endpoint /ip4/127.0.0.1/tcp/9000
@@ -56,6 +80,16 @@ From `src/decent_registry/provider_schema.py`:
 
 So: the payload committed to the signature always uses `endpoints = sorted(endpoints)`.
 
+### How `--host`/`--port` relate to `--endpoint`
+
+- `--host`/`--port` in `put provider` / `get provider` define the client’s temporary libp2p node listen address used to join the Kad-DHT (via `--bootstrap`).
+- `--endpoint` values are the provider’s advertised service locations (multiaddrs) stored in the provider record payload and returned by `get provider`.
+
+### What `provider_id` represents
+
+- `provider_id` is stored in the provider payload as field `4`.
+- In this repo’s current docs, `provider_id` is intended to be a 64-hex identifier corresponding to the Ed25519 provider identity (64 hex chars), and it should match the provider’s `--owner-privkey` signing key material.
+
 ---
 
 ## `get provider` usage
@@ -67,7 +101,7 @@ decent-registry get provider \
   --host 127.0.0.1 \
   --port <CLIENT_PORT> \
   --bootstrap <SEED_LISTEN_MULTIADDR>/p2p/<SEED_PEERID> \
-  --object-hash <OBJECT_HASH_64HEX>
+  --object-hash f91249c87f68ea00cf27c44fdfa5a78423e41e71b7d408e5901a9896d905c495
 ```
 
 ### What `get provider` prints
@@ -76,8 +110,8 @@ On success, stdout is a single JSON object (`json.dumps(..., indent=2, sort_keys
 
 ```json
 {
-  "object_key": "<OBJECT_HASH_64HEX>",
-  "provider_id": "<PROVIDER_ID_64HEX>",
+  "object_key": "f91249c87f68ea00cf27c44fdfa5a78423e41e71b7d408e5901a9896d905c495",
+  "provider_id": "<PROVIDER_ID_ED25519_PUBKEY_HEX>",
   "endpoints": ["<multiaddr>", ...] 
 }
 ```
@@ -173,7 +207,7 @@ def start_seed(seed_port: int, alive_seconds: float = 25.0):
     return t, bootstrap
 
 
-def write_privkey_pem(tmpdir: Path) -> Path:
+def write_privkey_pem(tmpdir: Path) -> tuple[Path, str]:
     kp = create_new_key_pair()
     seed = kp.private_key.to_bytes()  # 32-byte Ed25519 seed
 
@@ -187,7 +221,8 @@ def write_privkey_pem(tmpdir: Path) -> Path:
     pem_path = tmpdir / "owner_privkey.pem"
     pem_path.write_bytes(pem_bytes)
     os.chmod(pem_path, 0o600)
-    return pem_path
+    provider_id_hex = kp.public_key.to_bytes().hex()
+    return pem_path, provider_id_hex
 
 
 # Import after defining functions (keeps imports visible in the snippet)
@@ -205,8 +240,8 @@ else:
             "cd <repo-root> && . .venv/bin/activate"
         )
 
-obj = "f" * 64
-provider_id = "a" * 64
+obj = "f91249c87f68ea00cf27c44fdfa5a78423e41e71b7d408e5901a9896d905c495"
+# provider_id is derived from the generated keypair public key in write_privkey_pem()
 
 endpoints = [
     "/ip4/127.0.0.1/tcp/10002",
@@ -225,7 +260,7 @@ with tempfile.TemporaryDirectory() as td:
     client_port_3 = free_port()
     client_port_get = free_port()
 
-    owner_priv_pem_path = write_privkey_pem(tmpdir)
+    owner_priv_pem_path, provider_id = write_privkey_pem(tmpdir)
 
     def run_cli(args):
         cp = subprocess.run(
@@ -299,4 +334,4 @@ PY
 
 ---
 
-EOF
+
