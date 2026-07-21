@@ -256,6 +256,8 @@ twine upload dist/*
 - `.gitignore`: ignored paths (notably `.venv/`, `build/`, `dist/`, LMDB scratch)
 
 See also:
+- `docs/protocol-concepts.md` for the protocol concepts + mapping to config/CLI.
+- `docs/client-keygen-cli-config.md` for client key generation + client YAML/CLI configuration.
 - `docs/identity-put-get-examples.md` for a runnable end-to-end `put identity` / `get identity` example.
 - `docs/provider-put-get-examples.md` for a runnable end-to-end `put provider` / `get provider` example.
 - `docs/single-node-server-setup.md` for a copy-pasteable single-node `decent-registry node` startup + bootstrap derivation.
