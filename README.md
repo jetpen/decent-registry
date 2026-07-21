@@ -1,73 +1,21 @@
 # decent-registry
 
-A decentralized, eventually consistent DHT-based registry prototype.
+## Overview
 
-## Protocol overview
+decent-registry enables applications and services to publish and resolve signed registry records without central coordination. This supports the broader vision of decentralization on the Internet by providing authenticated information that can be updated over time while remaining verifiable and ordered per key.
 
-### Canonical CBOR and signing
+A record update is accepted only when it is cryptographically valid and consistent with prior state for that key, preventing unauthorized overwrites and making registry data tamper-evident for clients.
 
-All signed data is encoded with canonical CBOR (RFC 7049 canonical encoding via `cbor2.dumps(..., canonical=True)`).
+## Documentation
 
-**SignedUpdate** (input to the signature digest) is a canonical CBOR map:
-
-- `1`: `record_fields` (`map<uint, any>`)
-- `2`: `payload` (`map<uint, any>`)
-- `3`: `seq` (`uint`)
-
-**SignedEnvelope** is a canonical CBOR map:
-
-- `1`: `signed_update_bytes` (the canonical CBOR bytes of SignedUpdate)
-- `2`: `signature` (Ed25519 over `sha256(signed_update_bytes)`) 
-
-### Verification and overwrite rules
-
-When storing an update for a given `object_hash` key:
-
-- the signed envelope must be canonical
-- the Ed25519 signature must verify
-- `seq` must be strictly increasing for that `object_hash`
-- the first accepted owner binds the record; later overwrites must use the same owner public key
-- key revocation is specified as a future design in closed issue #15 (allow object rewrites signed with an identity key that has been revoked)
-
-### Provider record schema (payload)
-
-The provider payload is a CBOR map with unsigned integer keys:
-
-- `1`: `alg` (currently `Ed25519`)
-- `2`: `version` (`uint`)
-- `3`: `object_hash` (64-hex string)
-- `4`: `provider_id` (64-hex string)
-- `5`: `endpoints` (`list<string>`)
-
-Endpoint validation/signing constraints:
-
-- each endpoint must be a multiaddr string starting with `/`
-- endpoints are normalized and **lexicographically sorted before signing**
-- endpoints list is limited to 32 entries; each endpoint string is limited to 256 bytes
-
-### Identity record schema (verification inputs)
-
-SignedUpdate `record_fields` for an identity record are interpreted as:
-
-- `record_fields[1]`: `owner_name` bytes
-- `record_fields[2]`: `owner_public_key` bytes (Ed25519 public key)
-
-Identity record lookup key derivation (and owner binding):
-
-- `record_key = sha256(owner_name_bytes)`
-- verification binds the signed update to `owner_public_key` for that `record_key`
-
-Current implementation note:
-- current verification logic derives the identity key and owner binding from the `record_fields` above; it does not enforce additional identity payload fields at this layer (payload fields are reserved for the tagged-union identity schema from issues #11–#14).
-
-### DHT storage
-
-libp2p Kad-DHT stores the **SignedEnvelope CBOR bytes** under a namespaced key:
-
-- provider: `/decent-registry/provider/{object_hash}`
-- identity: `/decent-registry/identity/{object_key}`
-
-`get` reads the envelope, verifies it, and returns the decoded record for the requested type.
+- Protocol concepts: `docs/protocol-concepts.md`
+- Server setup:
+  - `docs/single-node-server-setup.md`
+  - `docs/multi-node-cluster-setup.md`
+- Client key generation + configuration: `docs/client-keygen-cli-config.md`
+- End-to-end examples:
+  - `docs/provider-put-get-examples.md`
+  - `docs/identity-put-get-examples.md`
 
 ## CLI
 
@@ -254,12 +202,4 @@ twine upload dist/*
 - `AGENTS.md`: agent coordination rules for this repo
 - `README.md`: this document
 - `.gitignore`: ignored paths (notably `.venv/`, `build/`, `dist/`, LMDB scratch)
-
-See also:
-- `docs/protocol-concepts.md` for the protocol concepts + mapping to config/CLI.
-- `docs/client-keygen-cli-config.md` for client key generation + client YAML/CLI configuration.
-- `docs/identity-put-get-examples.md` for a runnable end-to-end `put identity` / `get identity` example.
-- `docs/provider-put-get-examples.md` for a runnable end-to-end `put provider` / `get provider` example.
-- `docs/single-node-server-setup.md` for a copy-pasteable single-node `decent-registry node` startup + bootstrap derivation.
-- `docs/multi-node-cluster-setup.md` for a 2-node example where node2 bootstraps to node1 (Kad-DHT discovery).
 

@@ -2,10 +2,7 @@
 
 This document covers the core protocol concepts and how they map to the CLI flags and YAML config fields in this repo.
 
-Source-of-truth: `README.md` (protocol overview) and these modules:
-- `src/decent_registry/{config.py,cli.py,registry_service.py,verification.py,signed_envelope.py,encoding.py}`
-- `src/decent_registry/dht/libp2p_dht.py`
-- `src/decent_registry/provider_schema.py`
+This document is standalone: it defines the core protocol concepts, data schemas, and how they map to CLI flags and YAML configuration in this repo.
 
 ---
 
@@ -198,6 +195,8 @@ Enforcement details in `verification.py`:
 
 Consequence:
 - First accepted update for a key binds the record to its `owner_public_key`.
+
+Key revocation is specified as a future design in closed issue #15 (allow object rewrites signed with an identity key that has been revoked).
 - Later overwrites must be signed by the same owner public key.
 
 ---
