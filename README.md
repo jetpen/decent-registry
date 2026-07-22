@@ -1,4 +1,4 @@
-# decent-registry
+# Decentralized Registry (decent-registry)
 
 ## Overview
 
