@@ -39,7 +39,11 @@ PROVIDER_URL="https://github.com/curl/curl/releases/download/curl-8_7_1/curl-8.7
 
 # Put seq=1
 
-# Note: --bootstrap must be an identify-style multiaddr containing /p2p/<peerid>.
+# Note: --bootstrap origin (how to obtain SEED_LISTEN_MULTIADDR + SEED_PEERID)
+# - Start a seed node
+# - Capture its startup log line: Node <peer_id> listening on <listen_multiaddr>
+# - Construct the bootstrap multiaddr as: <listen_multiaddr>/p2p/<peer_id>
+# See docs/multi-node-cluster-setup.md for the walk-through.
 
 decent-registry put provider \
   --host 127.0.0.1 \
@@ -83,7 +87,10 @@ So: the payload committed to the signature always uses `endpoints = sorted(endpo
 ### Minimal invocation
 
 ```bash
-
+# Note: --bootstrap origin
+# - Start a seed node; capture: Node <peer_id> listening on <listen_multiaddr>
+# - Construct: <listen_multiaddr>/p2p/<peer_id>
+# See docs/multi-node-cluster-setup.md.
 decent-registry get provider \
   --host 127.0.0.1 \
   --port <CLIENT_PORT> \

@@ -34,8 +34,13 @@ So the DHT lookup key is:
 decent-registry keygen --output ~/.decent/owner_privkey.pem
 
 # Put seq=1
-# Note: --bootstrap must be an identify-style multiaddr containing /p2p/<peerid>
-#       (see runnable example below).
+# Note: --bootstrap origin (how to obtain SEED_LISTEN_MULTIADDR + SEED_PEERID)
+#       - Start a seed node
+#       - Capture its startup log line:
+#         `Node <peer_id> listening on <listen_multiaddr>`
+#       - Construct the bootstrap multiaddr as:
+#         `<listen_multiaddr>/p2p/<peer_id>`
+#       Walk-through: docs/multi-node-cluster-setup.md.
 decent-registry put identity \
   --host 127.0.0.1 \
   --port <CLIENT_PORT> \
@@ -57,6 +62,10 @@ decent-registry put identity \
 ### Minimal invocation
 
 ```bash
+# Note: --bootstrap origin
+# - Start a seed node; capture: Node <peer_id> listening on <listen_multiaddr>
+# - Construct: <listen_multiaddr>/p2p/<peer_id>
+# See docs/multi-node-cluster-setup.md.
 decent-registry get identity \
   --host 127.0.0.1 \
   --port <CLIENT_PORT> \
