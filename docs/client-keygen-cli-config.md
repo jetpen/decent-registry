@@ -3,7 +3,7 @@
 This document covers how a client (CLI) is configured to sign updates and talk to one or more `decent-registry` nodes.
 
 Links:
-- Protocol concepts: `docs/protocol-concepts.md`
+- Protocol concepts: [`docs/protocol-concepts.md`](docs/protocol-concepts.md)
 - Implemented modules: `src/decent_registry/config.py`, `src/decent_registry/cli.py`, `src/decent_registry/registry_service.py`
 
 Private key handling is file-path based. Private key material must never be printed/logged.

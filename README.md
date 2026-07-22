@@ -8,14 +8,14 @@ A record update is accepted only when it is cryptographically valid and consiste
 
 ## Documentation
 
-- Protocol concepts: `docs/protocol-concepts.md`
+- Protocol concepts: [`docs/protocol-concepts.md`](docs/protocol-concepts.md)
 - Server setup:
-  - `docs/single-node-server-setup.md`
-  - `docs/multi-node-cluster-setup.md`
-- Client key generation + configuration: `docs/client-keygen-cli-config.md`
+  - [`docs/single-node-server-setup.md`](docs/single-node-server-setup.md)
+  - [`docs/multi-node-cluster-setup.md`](docs/multi-node-cluster-setup.md)
+- Client key generation + configuration: [`docs/client-keygen-cli-config.md`](docs/client-keygen-cli-config.md)
 - End-to-end examples:
-  - `docs/provider-put-get-examples.md`
-  - `docs/identity-put-get-examples.md`
+  - [`docs/provider-put-get-examples.md`](docs/provider-put-get-examples.md)
+  - [`docs/identity-put-get-examples.md`](docs/identity-put-get-examples.md)
 
 ## CLI
 
@@ -199,7 +199,7 @@ twine upload dist/*
 - `tests/`: pytest test suite
 - `docs/`: project documentation
 - `pyproject.toml`: build metadata + dependencies + pytest config
-- `AGENTS.md`: agent coordination rules for this repo
-- `README.md`: this document
+- [`AGENTS.md`](AGENTS.md): agent coordination rules for this repo
+- [`README.md`](README.md): this document
 - `.gitignore`: ignored paths (notably `.venv/`, `build/`, `dist/`, LMDB scratch)
 

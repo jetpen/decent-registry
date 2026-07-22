@@ -188,5 +188,5 @@ PY
 This is meant as a demo for extracting the bootstrap multiaddr; record operations are covered in the client docs.
 
 See:
-- `docs/identity-put-get-examples.md`
-- `docs/provider-put-get-examples.md`
+- [`docs/identity-put-get-examples.md`](docs/identity-put-get-examples.md)
+- [`docs/provider-put-get-examples.md`](docs/provider-put-get-examples.md)

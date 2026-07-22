@@ -2,15 +2,15 @@
 
 ### Issue tracker
 
-Issues and PRDs for this repo live as GitHub issues. See `docs/agents/issue-tracker.md`.
+Issues and PRDs for this repo live as GitHub issues. See [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md).
 
 ### Triage labels
 
-Triage labels use the standard vocabulary. See `docs/agents/triage-labels.md`.
+Triage labels use the standard vocabulary. See [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md).
 
 ### Domain docs
 
-Single-context layout. See `docs/agents/domain.md`.
+Single-context layout. See [`docs/agents/domain.md`](docs/agents/domain.md).
 
 ## Guidelines
 
