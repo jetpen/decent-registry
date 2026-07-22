@@ -53,18 +53,16 @@ YAML
 Run node1 (keep it running):
 
 ```bash
-# -v forces INFO logging so you can capture the startup line
+# -v optional: server prints `[BOOTSTRAP] ...` to stdout; -v shows INFO logs
 decent-registry -v node --config ~/.decent/registry-node1.yaml
 ```
 
-At startup, capture the logged values:
+At startup, copy the bootstrap line emitted by node1:
 
-- line shape (INFO):
-  - `Node <node1_peer_id> listening on <node1_listen_multiaddr>`
-- typically `<node1_listen_multiaddr>` is of the form:
-  - `/ip4/127.0.0.1/tcp/9000`
+- line shape:
+  - `[BOOTSTRAP] <node1_listen_multiaddr>/p2p/<node1_peer_id>`
 
-Form the node2 bootstrap multiaddr:
+Set the node2 bootstrap multiaddr by copying everything after the `[BOOTSTRAP]` prefix:
 
 ```text
 NODE1_BOOTSTRAP=<node1_listen_multiaddr>/p2p/<node1_peer_id>
@@ -76,7 +74,7 @@ Example shape:
 NODE1_BOOTSTRAP=/ip4/127.0.0.1/tcp/9000/p2p/<NODE1_PEERID>
 ```
 
-In Terminal 2, set `NODE1_BOOTSTRAP` to the exact computed string above (copy/paste) before running the node2 config block.
+In Terminal 2, set `NODE1_BOOTSTRAP` to that exact multiaddr value (copy/paste) before running the node2 config block.
 
 ### Terminal 2: start node2 (bootstraps to node1)
 

@@ -127,8 +127,10 @@ def _node_command(args: argparse.Namespace) -> int:
         listen = f"/ip4/{args.host}/tcp/{args.port}"
         datastore = _make_datastore_from_args(args)
         async with Libp2pKadDHT(listen=listen, durable_store=datastore) as dht:
+            listen_maddr = dht.get_listen_multiaddr()
             node_peer_id = dht.host.get_id().to_string()
-            logger.info("Node %s listening on %s", node_peer_id, dht.get_listen_multiaddr())
+            logger.info("Node %s listening on %s", node_peer_id, listen_maddr)
+            print(f"[BOOTSTRAP] {listen_maddr}/p2p/{node_peer_id}", flush=True)
             ok = True
             if endpoints:
                 ok_any = False
