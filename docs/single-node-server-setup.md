@@ -68,6 +68,10 @@ Notes:
 
   `Node <peer_id> listening on <listen_multiaddr>`
 
+  The server also prints the ready-to-use bootstrap multiaddr to stdout as:
+
+  `[BOOTSTRAP] <listen_multiaddr>/p2p/<peer_id>`
+
   where `<listen_multiaddr>` is typically of the form:
 
   `/ip4/<host>/tcp/<port>`
@@ -107,16 +111,11 @@ decent-registry node \
 
 ### 2) Form the identify-style bootstrap multiaddr
 
-From the node log line:
+From the server output:
 
-- `<peer_id>` is the node peer ID printed in `Node <peer_id> listening on ...`.
-- `<listen_multiaddr>` is printed after `listening on`.
-
-Bootstrap multiaddr to use in client commands:
-
-```text
-${listen_multiaddr}/p2p/${peer_id}
-```
+- The full bootstrap multiaddr is printed as:
+  `[BOOTSTRAP] <listen_multiaddr>/p2p/<peer_id>`
+- Use the entire multiaddr after `[BOOTSTRAP]` as the value of `--bootstrap` in client commands.
 
 Example shape:
 
@@ -128,7 +127,7 @@ Example shape:
 
 ## Optional: bounded demo script (prints derived bootstrap)
 
-Runs the node briefly, extracts `<peer_id>` and `<listen_multiaddr>` from the log line, then prints the derived bootstrap multiaddr.
+Runs the node briefly, extracts the server's `[BOOTSTRAP] ...` line, then prints the bootstrap multiaddr.
 
 ```bash
 python3 - <<'PY'
@@ -173,12 +172,12 @@ with tempfile.TemporaryDirectory() as td:
     p = subprocess.run(cmd, capture_output=True, text=True)
     out = p.stdout + p.stderr
 
-    m = re.search(r"Node\s+([^\s]+)\s+listening on\s+([^\s]+)", out)
+    m = re.search(r"^\[BOOTSTRAP\]\s+(\S+)$", out, re.MULTILINE)
     if not m:
         print(out)
-        raise SystemExit('could not parse node startup line')
-    peer_id, listen = m.group(1), m.group(2)
-    print(f"BOOTSTRAP={listen}/p2p/{peer_id}")
+        raise SystemExit('could not parse [BOOTSTRAP] line')
+    bootstrap = m.group(1)
+    print(f"BOOTSTRAP={bootstrap}")
     print(f"exit_code={p.returncode}")
 
 
