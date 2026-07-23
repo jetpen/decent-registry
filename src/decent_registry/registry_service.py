@@ -4,13 +4,11 @@ import hashlib
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from decent_registry.crypto_utils import (
-    load_ed25519_keypair_from_privkey_pem_path,
+from decent_registry.envelope_builder import (
+    build_identity_envelope,
+    build_provider_envelope,
 )
-from decent_registry.encoding import encode_signed_update
-from decent_registry.provider_schema import ProviderPayloadV1, build_provider_payload_dict
-from decent_registry.signed_envelope import encode_signed_envelope
-from decent_registry.verification import make_signed_update_signature
+from decent_registry.provider_schema import ProviderPayloadV1
 
 
 class RegistryDHT(Protocol):
@@ -58,31 +56,14 @@ class RegistryService:
         alg: str = "Ed25519",
         version: int = 1,
     ) -> None:
-        owner_priv, owner_pub_bytes = (
-            load_ed25519_keypair_from_privkey_pem_path(owner_privkey_pem_path)
-        )
-
-        payload_dict: dict[int, Any] = build_provider_payload_dict(
-            alg=alg,
-            version=version,
+        envelope_cbor = build_provider_envelope(
             object_hash=object_hash,
             provider_url=provider_url,
+            owner_privkey_pem_path=owner_privkey_pem_path,
+            seq=seq,
             endpoints=endpoints,
-        )
-        record_fields: dict[int, Any] = {1: owner_pub_bytes}
-
-        signed_update_bytes = encode_signed_update(
-            record_fields=record_fields,
-            payload=payload_dict,
-            seq=int(seq),
-        )
-        signature = make_signed_update_signature(
-            signed_update_bytes_canonical=signed_update_bytes,
-            owner_private_key=owner_priv,
-        )
-        envelope_cbor = encode_signed_envelope(
-            signed_update_bytes=signed_update_bytes,
-            signature=signature,
+            alg=alg,
+            version=version,
         )
         await self.dht.put_signed_provider_record(object_hash, envelope_cbor)
 
@@ -101,30 +82,13 @@ class RegistryService:
         owner_privkey_pem_path: str,
         seq: int,
     ) -> None:
-        object_key_hex = _derive_identity_object_hash_from_owner_name_hex(owner_name_hex)
-
-        owner_priv, owner_pub_bytes = (
-            load_ed25519_keypair_from_privkey_pem_path(owner_privkey_pem_path)
+        object_key_hex = _derive_identity_object_hash_from_owner_name_hex(
+            owner_name_hex
         )
-        owner_name_bytes = _parse_hex_bytes(owner_name_hex, name="owner_name")
-
-        record_fields: dict[int, Any] = {
-            1: owner_name_bytes,
-            2: owner_pub_bytes,
-        }
-
-        signed_update_bytes = encode_signed_update(
-            record_fields=record_fields,
-            payload={},
-            seq=int(seq),
-        )
-        signature = make_signed_update_signature(
-            signed_update_bytes_canonical=signed_update_bytes,
-            owner_private_key=owner_priv,
-        )
-        envelope_cbor = encode_signed_envelope(
-            signed_update_bytes=signed_update_bytes,
-            signature=signature,
+        envelope_cbor = build_identity_envelope(
+            owner_name_hex=owner_name_hex,
+            owner_privkey_pem_path=owner_privkey_pem_path,
+            seq=seq,
         )
         await self.dht.put_signed_identity_record(object_key_hex, envelope_cbor)
 
