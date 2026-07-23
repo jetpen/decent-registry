@@ -17,6 +17,19 @@ DHT key is the literal `--object-hash` value (64 hex chars).
 
 ---
 
+## Network topology: where `--host`/`--port`, `--bootstrap`, and the provider record fit
+
+The client runs a temporary libp2p node using `--host`/`--port` to connect to the Kad-DHT.
+The server/seed node is reached via the `--bootstrap` multiaddr (the peer’s advertised listen multiaddr), which the client uses for peer/DHT discovery during `put`/`get provider`.
+
+After the client `get`s the provider record, it uses the provider’s stored endpoint multiaddrs (`--endpoint`) plus the provider’s `--provider-url` to download the object.
+
+```mermaid
+graph LR
+  Client["Client node\n--host <HOST>\n--port <CLIENT_PORT>"] --> Seed["Server/seed node\n--bootstrap <BOOTSTRAP_MULTIADDR>/p2p/<PEER_ID>"]
+  Client --> Provider["Provider\nendpoints: <ENDPOINT_MULTIADDR...>\nprovider-url: <PROVIDER_URL>"]
+```
+
 ## `put provider` usage
 
 ### Minimal invocation
