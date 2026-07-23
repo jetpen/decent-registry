@@ -35,6 +35,57 @@ graph LR
   Client["Client node\n--host <HOST>\n--port <CLIENT_PORT>"] --> Seed["Server/seed node\n--bootstrap <BOOTSTRAP_MULTIADDR>/p2p/<PEER_ID>"]
 ```
 
+### Using multiple bootstrap seeds
+
+`--bootstrap` accepts **multiple** seed multiaddrs. In this repo, the CLI defines `--bootstrap` as `action="append"`, so each `--bootstrap <MADDR>` adds one seed to the list.
+
+#### Accepted multiaddr list shapes
+
+1) Repeated flags (produces a list of multiaddrs)
+
+```bash
+--bootstrap <BOOTSTRAP1>
+--bootstrap <BOOTSTRAP2>
+```
+
+2) Comma-separated inside one flag (also flattened into a list)
+
+```bash
+--bootstrap "<BOOTSTRAP1>,<BOOTSTRAP2>"
+```
+
+3) YAML config list (server `network.bootstrap`, and also client `network.bootstrap` if set)
+
+```yaml
+network:
+  bootstrap:
+    - "<BOOTSTRAP1>"
+    - "<BOOTSTRAP2>"
+```
+
+Where each `<BOOTSTRAP...>` is an identify-style multiaddr with peer id:
+
+- `/ip4/<IP>/tcp/<PORT>/p2p/<PEER_ID>`
+
+#### Network topology (2 seed nodes)
+
+```mermaid
+graph LR
+  Client["Client node\n--host <HOST>\n--port <CLIENT_PORT>"] --> Seed1["Seed node 1\n<SEED1_LISTEN_MULTIADDR>/p2p/<SEED1_PEERID>"]
+  Client --> Seed2["Seed node 2\n<SEED2_LISTEN_MULTIADDR>/p2p/<SEED2_PEERID>"]
+```
+
+#### Example client command (connect to both seeds)
+
+```bash
+decent-registry get identity \
+  --host 127.0.0.1 \
+  --port <CLIENT_PORT> \
+  --bootstrap <SEED1_LISTEN_MULTIADDR>/p2p/<SEED1_PEERID> \
+  --bootstrap <SEED2_LISTEN_MULTIADDR>/p2p/<SEED2_PEERID> \
+  --owner-name <OWNER_NAME_HEX>
+```
+
 ## `put identity` usage
 
 ### Minimal invocation
