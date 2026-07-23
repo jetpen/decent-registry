@@ -26,7 +26,7 @@ After the client `get`s the provider record, it uses the provider’s stored end
 
 ```mermaid
 graph LR
-  Client["Client node\n--host <HOST>\n--port <CLIENT_PORT>"] --> Seed["Server/seed node\n--bootstrap <BOOTSTRAP_MULTIADDR>/p2p/<PEER_ID>"]
+  Client["Client\n--host 127.0.0.1\n--port 9100\n--bootstrap /ip4/127.0.0.1/tcp/9000/p2p/12D3KooW..."] --> Seed["Seed node\n/ip4/127.0.0.1/tcp/9000\npeer: 12D3KooW..."]
   Client --> Provider["Provider\nendpoints: <ENDPOINT_MULTIADDR...>\nprovider-url: <PROVIDER_URL>"]
 ```
 
@@ -66,8 +66,8 @@ Where each `<BOOTSTRAP...>` is an identify-style multiaddr with peer id:
 
 ```mermaid
 graph LR
-  Client["Client node\n--host <HOST>\n--port <CLIENT_PORT>"] --> Seed1["Seed node 1\n<SEED1_LISTEN_MULTIADDR>/p2p/<SEED1_PEERID>"]
-  Client --> Seed2["Seed node 2\n<SEED2_LISTEN_MULTIADDR>/p2p/<SEED2_PEERID>"]
+  Client["Client\n--host 127.0.0.1\n--port 9100\n--bootstrap /ip4/127.0.0.1/tcp/9000/p2p/12D3KooWAAA...\n--bootstrap /ip4/127.0.0.1/tcp/9001/p2p/12D3KooWBBB..."] --> Seed1["Seed node 1\n/ip4/127.0.0.1/tcp/9000\npeer: 12D3KooWAAA..."]
+  Client --> Seed2["Seed node 2\n/ip4/127.0.0.1/tcp/9001\npeer: 12D3KooWBBB..."]
 ```
 
 #### Example client command (connect to both seeds)
@@ -75,9 +75,9 @@ graph LR
 ```bash
 decent-registry get provider \
   --host 127.0.0.1 \
-  --port <CLIENT_PORT> \
-  --bootstrap <SEED1_LISTEN_MULTIADDR>/p2p/<SEED1_PEERID> \
-  --bootstrap <SEED2_LISTEN_MULTIADDR>/p2p/<SEED2_PEERID> \
+  --port 9100 \
+  --bootstrap /ip4/127.0.0.1/tcp/9000/p2p/12D3KooWAAA... \
+  --bootstrap /ip4/127.0.0.1/tcp/9001/p2p/12D3KooWBBB... \
   --object-hash <OBJECT_HASH>
 ```
 
