@@ -25,6 +25,16 @@ So the DHT lookup key is:
 
 ---
 
+## Network topology: where `--host`/`--port` vs `--bootstrap` fit
+
+The client uses `--host`/`--port` to run a temporary libp2p node that connects to the Kad-DHT.
+The server/seed node is reached via the `--bootstrap` multiaddr (the peer’s advertised listen multiaddr), which the client uses for peer/DHT discovery during `put`/`get`.
+
+```mermaid
+graph LR
+  Client["Client node\n--host <HOST>\n--port <CLIENT_PORT>"] --> Seed["Server/seed node\n--bootstrap <BOOTSTRAP_MULTIADDR>/p2p/<PEER_ID>"]
+```
+
 ## `put identity` usage
 
 ### Minimal invocation
