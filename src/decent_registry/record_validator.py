@@ -7,7 +7,12 @@ from typing import Any
 from decent_registry.encoding import decode_canonical_signed_update
 from decent_registry.provider_schema import ProviderPayloadV1, decode_provider_payload_dict
 from decent_registry.signed_envelope import decode_signed_envelope
-from decent_registry.verification import SeqStateEntry, validate_signed_update_overwrite
+from decent_registry.verification import (
+    SeqStateEntry,
+    validate_identity_update,
+    validate_provider_update,
+    validate_signed_update_overwrite,
+)
 
 
 @dataclass(frozen=True, slots=True)

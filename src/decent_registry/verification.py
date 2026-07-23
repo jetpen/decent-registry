@@ -95,24 +95,10 @@ def _extract_provider_and_keys(
     return derived_record_key, bytes(owner_pk)
 
 
-def validate_signed_update_overwrite(
+def _decode_signed_update_strict(
     *,
-    record_key: bytes,
     signed_update_bytes_canonical: bytes,
-    signature: bytes,
-    seq_state: MutableMapping[bytes, SeqStateEntry],
-    update_state_on_success: bool = True,
-) -> dict[int, Any]:
-    """Validate a single overwrite for a record key.
-
-    Enforces:
-    - CBOR canonical SignedUpdate decoding
-    - digest+signature verification (accepts either message=raw or message=sha256(raw))
-    - seq strictly increasing per record key
-    - owner-binding per record key (first accepted owner binds)
-    - lookup-key mismatch rejection
-    """
-
+) -> tuple[dict[int, Any], dict[int, Any], dict[int, Any], int]:
     signed_update = decode_canonical_signed_update(signed_update_bytes_canonical)
 
     if set(signed_update.keys()) != {1, 2, 3}:
@@ -131,36 +117,17 @@ def validate_signed_update_overwrite(
     record_fields: dict[int, Any] = record_fields_raw
     payload: dict[int, Any] = payload_raw
     seq = seq_raw
+    return signed_update, record_fields, payload, seq
 
-    # Determine record kind and derive record key + owner pubkey from the update.
-    derived_record_key: bytes
-    owner_public_key: bytes
 
-    identity_ok = False
-    try:
-        derived_record_key, owner_public_key = _extract_identity_and_keys(
-            record_fields=record_fields, payload=payload
-        )
-        identity_ok = True
-    except Exception:
-        identity_ok = False
-
-    if not identity_ok:
-        derived_record_key, owner_public_key = _extract_provider_and_keys(
-            record_fields=record_fields, payload=payload
-        )
-
-    if derived_record_key != record_key:
-        raise ValueError("lookup-key mismatch")
-
-    # Signature verification
-    if not verify_ed25519_signature(
-        owner_public_key=owner_public_key,
-        signed_update_bytes_canonical=signed_update_bytes_canonical,
-        signature=signature,
-    ):
-        raise ValueError("wrong signature")
-
+def _enforce_seq_and_owner_binding(
+    *,
+    record_key: bytes,
+    seq: int,
+    owner_public_key: bytes,
+    seq_state: MutableMapping[bytes, SeqStateEntry],
+    update_state_on_success: bool,
+) -> None:
     prev = seq_state.get(record_key)
     if prev is not None:
         if seq <= prev.seq:
@@ -177,7 +144,125 @@ def validate_signed_update_overwrite(
             owner_public_key=prev.owner_public_key, seq=seq
         )
 
+
+def validate_provider_update(
+    *,
+    record_key: bytes,
+    signed_update_bytes_canonical: bytes,
+    signature: bytes,
+    seq_state: MutableMapping[bytes, SeqStateEntry],
+    update_state_on_success: bool = True,
+) -> dict[int, Any]:
+    signed_update, record_fields, payload, seq = _decode_signed_update_strict(
+        signed_update_bytes_canonical=signed_update_bytes_canonical
+    )
+
+    derived_record_key, owner_public_key = _extract_provider_and_keys(
+        record_fields=record_fields, payload=payload
+    )
+
+    if derived_record_key != record_key:
+        raise ValueError("lookup-key mismatch")
+
+    if not verify_ed25519_signature(
+        owner_public_key=owner_public_key,
+        signed_update_bytes_canonical=signed_update_bytes_canonical,
+        signature=signature,
+    ):
+        raise ValueError("wrong signature")
+
+    _enforce_seq_and_owner_binding(
+        record_key=record_key,
+        seq=seq,
+        owner_public_key=owner_public_key,
+        seq_state=seq_state,
+        update_state_on_success=update_state_on_success,
+    )
+
     return signed_update
+
+
+def validate_identity_update(
+    *,
+    record_key: bytes,
+    signed_update_bytes_canonical: bytes,
+    signature: bytes,
+    seq_state: MutableMapping[bytes, SeqStateEntry],
+    update_state_on_success: bool = True,
+) -> dict[int, Any]:
+    signed_update, record_fields, payload, seq = _decode_signed_update_strict(
+        signed_update_bytes_canonical=signed_update_bytes_canonical
+    )
+
+    derived_record_key, owner_public_key = _extract_identity_and_keys(
+        record_fields=record_fields, payload=payload
+    )
+
+    if derived_record_key != record_key:
+        raise ValueError("lookup-key mismatch")
+
+    if not verify_ed25519_signature(
+        owner_public_key=owner_public_key,
+        signed_update_bytes_canonical=signed_update_bytes_canonical,
+        signature=signature,
+    ):
+        raise ValueError("wrong signature")
+
+    _enforce_seq_and_owner_binding(
+        record_key=record_key,
+        seq=seq,
+        owner_public_key=owner_public_key,
+        seq_state=seq_state,
+        update_state_on_success=update_state_on_success,
+    )
+
+    return signed_update
+
+
+def validate_signed_update_overwrite(
+    *,
+    record_key: bytes,
+    signed_update_bytes_canonical: bytes,
+    signature: bytes,
+    seq_state: MutableMapping[bytes, SeqStateEntry],
+    update_state_on_success: bool = True,
+) -> dict[int, Any]:
+    """Backward-compatible delegator.
+
+    Dispatches using the same heuristic as the prior implementation:
+    attempt identity key extraction; on failure, attempt provider key extraction.
+
+    Validation errors after dispatch (e.g. wrong signature / seq monotonic)
+    are not masked.
+    """
+
+    _, record_fields, payload, _seq = _decode_signed_update_strict(
+        signed_update_bytes_canonical=signed_update_bytes_canonical
+    )
+
+    identity_ok = False
+    try:
+        _extract_identity_and_keys(record_fields=record_fields, payload=payload)
+        identity_ok = True
+    except Exception:
+        identity_ok = False
+
+    if identity_ok:
+        return validate_identity_update(
+            record_key=record_key,
+            signed_update_bytes_canonical=signed_update_bytes_canonical,
+            signature=signature,
+            seq_state=seq_state,
+            update_state_on_success=update_state_on_success,
+        )
+
+    return validate_provider_update(
+        record_key=record_key,
+        signed_update_bytes_canonical=signed_update_bytes_canonical,
+        signature=signature,
+        seq_state=seq_state,
+        update_state_on_success=update_state_on_success,
+    )
 
 
 def make_signed_update_signature(
