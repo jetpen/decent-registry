@@ -6,6 +6,22 @@ decent-registry enables applications and services to publish and resolve signed 
 
 A record update is accepted only when it is cryptographically valid and consistent with prior state for that key, preventing unauthorized overwrites and making registry data tamper-evident for clients.
 
+## Scalability
+
+Record lookup keys in this repo are SHA-256 digests of raw identifier bytes. Collision risk is therefore the probability that two distinct identifiers map to the same 256-bit digest.
+
+Birthday bound (for n distinct identifiers stored/used):
+- Exact: p ≈ 1 - exp(-n(n-1)/(2*2^256))
+- Small-p approximation: p ≈ n^2 / 2^257
+
+Numerical examples (approx):
+- n = 1e9  => p ≈ 4.318e-60
+- n = 1e12 => p ≈ 4.318e-54
+- n = 1e18 => p ≈ 4.318e-42
+- n for p ≈ 1e-2 (1%) => n ≈ 4.812e37
+
+Conclusion: for any foreseeable number of identity/provider records, SHA-256 key clashes are effectively impossible; scaling is limited by storage/DHT capacity and not by digest collisions.
+
 ## Documentation
 
 - Protocol concepts: [`docs/protocol-concepts.md`](docs/protocol-concepts.md)
