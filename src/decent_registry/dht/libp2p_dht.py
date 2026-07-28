@@ -86,10 +86,20 @@ class Libp2pKadDHT:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
+        # Suppress secondary cleanup failures so that primary validation errors
+        # (e.g. non-monotonic seq -> ValueError) propagate cleanly to callers.
+        # Passing the original exception info into child contexts can trigger
+        # Trio internal errors during async-generator finalization.
         if self._dht_ctx is not None:
-            await self._dht_ctx.__aexit__(exc_type, exc, tb)
+            try:
+                await self._dht_ctx.__aexit__(None, None, None)
+            except Exception:
+                pass
         if self._host_ctx is not None:
-            await self._host_ctx.__aexit__(exc_type, exc, tb)
+            try:
+                await self._host_ctx.__aexit__(None, None, None)
+            except Exception:
+                pass
 
         if self._durable_store is not None:
             self._durable_store.close()
