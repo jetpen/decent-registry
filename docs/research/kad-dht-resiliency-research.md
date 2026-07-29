@@ -22,6 +22,7 @@ This document is expected to be appended by subsequent resiliency research ticke
 - Does libp2p Kad-DHT replicate PUTs across a unified overlay, or does placement remain constrained to the portion of the overlay the node effectively participates in?
 - Does durable store configuration (LMDB) change observed cross-network resiliency? When DHT retrieval fails, does fallback to local durable store mask cross-network availability failures?
 
+- [#67] When a multi-seed client performs a PUT into one network and then a GET for the same record, does the default client-side GET algorithm try the other network's seed(s) as fallback (i.e., does `get_signed_provider_record()` → `get_value(...)` scan across bootstrapped seeds, or does it only query the overlay it can route to at GET time)?
 
 ## Relevant code facts (repo)
 ### Bridge / bootstrap behavior
