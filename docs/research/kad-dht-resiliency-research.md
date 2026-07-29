@@ -75,8 +75,8 @@ Runner script committed in this repo:
 - commit: `8db37eb` (“test/exp: bridge partition resiliency experiment script”) 
 
 ## Findings (observed evidence)
-### Output summary from the implemented runner (single run)
-The runner printed:
+### Output summary from the implemented runner (single run) (bridge PUT)
+The original runner printed:
 
 - During bridge is online, after `bridge` puts `obj_hash1`:
   - `bridge_found: True`
@@ -86,8 +86,36 @@ The runner printed:
 - After bridge disconnect (bridge process stopped):
   - `node2b_obj_hash2_found: False`
 
-### Direct implication
+### Direct implication (from previous evidence)
 In this local topology model, connecting a bridge node to both seeds was not sufficient to make values placed while the bridge was online become retrievable by nodes on the other side, and after the bridge disconnects, cross-network availability did not persist.
+
+### Additional evidence: PUT placement when a multi-seed client does the PUT
+New local experiment (scenario-matrix) executed via:
+- `scripts/put_multiseed_client_put_placement_experiment.py`
+
+Matrix:
+- Scenario A (control): client bootstraps to `seed1a` only, then PUTs `obj_hash_a`.
+- Scenario B (test): client bootstraps to `seed1a` AND `seed2a` simultaneously, then PUTs `obj_hash_b`.
+- After each client disconnect, probes are re-run.
+
+Observed single-run results (from the script output):
+- `scenario_A_put_via_client_seed1_only`:
+  - `node1b_found: False`
+  - `node2b_found: False`
+- `scenario_B_put_via_client_seed1_and_seed2`:
+  - `node1b_found: False`
+  - `node2b_found: True`
+  - `node2b_first_found_after_s: ~9.83`
+- `persistence_after_disconnect`:
+  - `node2b_get_obj_hash_a: False`
+  - `node2b_get_obj_hash_b: True`
+
+### Interpretation for the #66 question
+In this run, a multi-seed client’s PUT was not simultaneously available across both networks.
+- The PUT made `obj_hash_b` retrievable in Network2 (`node2b_found=True`) but not Network1 (`node1b_found=False`).
+- After the multi-seed client disconnected, Network2 still retrieved the record while Network1 did not.
+
+Therefore, the PUT appears to be effectively placed/accepted into one overlay partition (not both) under the tested conditions.
 
 ## Limitations
 - This is **not** a true transport-level network partition.
