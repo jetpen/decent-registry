@@ -7,6 +7,7 @@ import trio
 from multiaddr import Multiaddr
 from libp2p import new_host
 from libp2p.crypto.ed25519 import create_new_key_pair
+from libp2p.crypto.keys import KeyPair
 from libp2p.kad_dht.kad_dht import KadDHT, DHTMode
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.tools.anyio_service.context import background_trio_service
@@ -30,9 +31,10 @@ class Libp2pKadDHT:
         self,
         listen: str = "/ip4/127.0.0.1/tcp/0",
         *,
+        key_pair: KeyPair | None = None,
         durable_store: StorageBackend | None = None,
     ):
-        self._key_pair = create_new_key_pair()
+        self._key_pair = key_pair if key_pair is not None else create_new_key_pair()
         self._listen = Multiaddr(listen)
         self._host = new_host(key_pair=self._key_pair, enable_tcp=True)
         self._durable_store = durable_store

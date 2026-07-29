@@ -4,6 +4,7 @@ import logging
 import os
 import signal
 import sys
+from pathlib import Path
 from typing import Any
 
 import trio
@@ -19,6 +20,9 @@ from decent_registry.config import (
     resolve_required_owner_privkey_pem_path,
     resolve_server_config,
 )
+from libp2p.crypto.ed25519 import Ed25519PrivateKey, create_new_key_pair
+from libp2p.crypto.keys import KeyPair
+
 from decent_registry.dht.libp2p_dht import Libp2pKadDHT
 from decent_registry.registry_service import RegistryService
 from decent_registry.durable_store import LMDBDatastore
@@ -83,6 +87,45 @@ def _make_datastore_from_args(args: argparse.Namespace) -> LMDBDatastore:
     return LMDBDatastore(path=args.datastore_path, mapsize_bytes=args.mapsize)
 
 
+_NODE_IDENTITY_KEY_FILENAME = "node_privkey.bin"
+
+
+def _node_identity_key_path(datastore_path: str) -> Path:
+    # Node identity key should live alongside the node's LMDB durable store.
+    p = Path(datastore_path).expanduser()
+    if p.name.endswith(".lmdb"):
+        return p.parent / _NODE_IDENTITY_KEY_FILENAME
+    return p / _NODE_IDENTITY_KEY_FILENAME
+
+
+def _load_or_create_node_identity_key(datastore_path: str) -> KeyPair:
+    key_path = _node_identity_key_path(datastore_path)
+
+    if key_path.exists():
+        raw = key_path.read_bytes()
+        priv = Ed25519PrivateKey.from_bytes(raw)
+        return KeyPair(private_key=priv, public_key=priv.get_public_key())
+
+    key_path.parent.mkdir(parents=True, exist_ok=True)
+
+    key_pair = create_new_key_pair()
+    raw = key_pair.private_key.to_bytes()
+
+    # Avoid overwriting existing keys (including races) with an atomic create.
+    try:
+        with open(key_path, "xb") as f:
+            f.write(raw)
+        os.chmod(key_path, 0o600)
+    except FileExistsError:
+        # Another process created it; load the persisted version.
+        raw = key_path.read_bytes()
+        priv = Ed25519PrivateKey.from_bytes(raw)
+        return KeyPair(private_key=priv, public_key=priv.get_public_key())
+
+    return key_pair
+
+
+
 def _keygen_command(args: argparse.Namespace) -> int:
     output_path = args.output
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -126,7 +169,8 @@ def _node_command(args: argparse.Namespace) -> int:
         endpoints = _parse_endpoints(args.bootstrap or [])
         listen = f"/ip4/{args.host}/tcp/{args.port}"
         datastore = _make_datastore_from_args(args)
-        async with Libp2pKadDHT(listen=listen, durable_store=datastore) as dht:
+        node_key = _load_or_create_node_identity_key(str(args.datastore_path))
+        async with Libp2pKadDHT(listen=listen, durable_store=datastore, key_pair=node_key) as dht:
             listen_maddr = dht.get_listen_multiaddr()
             node_peer_id = dht.host.get_id().to_string()
             logger.info("Node %s listening on %s", node_peer_id, listen_maddr)
