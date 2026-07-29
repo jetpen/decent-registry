@@ -1,11 +1,27 @@
-# Issue #65 — Resiliency across libp2p Kad-DHT partitions / bridge behavior
+# Resiliency across libp2p / Kad-DHT partitions and multi-seed bridge behavior
 
-## Question
-Two otherwise-isolated libp2p/Kad-DHT networks exist:
+## Question (general)
+Consider two otherwise-isolated libp2p/Kad-DHT networks:
 - Network1: seed1a + node1b
 - Network2: seed2a + node2b
 
-A client/bridge node bootstraps using both seeds (seed1a and seed2a). Does that establish a durable “bridge” such that information/federation can be synchronized across both networks even after the bridge disconnects? Further: can routing-table / peer-contact information propagate across the bridge so that, after the bridge disconnects, the two networks remain interconnected?
+A client node may bootstrap/connect to multiple seeds (e.g., one seed in each network) and then:
+1) perform PUTs of signed registry records
+2) optionally remain online while doing so
+
+What resiliency properties follow under partition / intermittent connectivity?
+- Cross-network *data availability*: can nodes on both sides retrieve values placed by the multi-seed client?
+- Cross-network *persistence after disconnect*: does availability persist after the multi-seed client disconnects?
+- Cross-network *routing/peer-contact propagation*: can routing-table/peer-contact state remain sufficient to keep networks interconnected after disconnect?
+
+## Evidence log (amendable)
+This document is expected to be appended by subsequent resiliency research tickets.
+
+## Open questions / additions
+- How does record placement differ when the multi-seed client performs PUTs vs when it only performs GETs?
+- Does libp2p Kad-DHT replicate PUTs across a unified overlay, or does placement remain constrained to the portion of the overlay the node effectively participates in?
+- Does durable store configuration (LMDB) change observed cross-network resiliency? When DHT retrieval fails, does fallback to local durable store mask cross-network availability failures?
+
 
 ## Relevant code facts (repo)
 ### Bridge / bootstrap behavior
@@ -31,9 +47,9 @@ Implemented via `_kad_key(object_hash, kind)` in `Libp2pKadDHT`.
   - queries via `await self.dht.get_value(kad_key, quorum=quorum)`
   - if DHT value is missing and durable store exists, falls back to local LMDB cache
 
-## Implemented experiment
+## Implemented experiment (previous evidence)
 ### Goal
-Empirically test the “bridge enables cross-network availability after disconnect” hypothesis.
+Empirically test cross-network data availability and post-disconnect persistence when a node connected to multiple seeds performs PUTs.
 
 ### Experiment topology (local)
 Created 5 in-process Kad-DHT nodes bound to localhost ephemeral ports:
@@ -56,7 +72,7 @@ Created 5 in-process Kad-DHT nodes bound to localhost ephemeral ports:
 ### Test harness
 Runner script committed in this repo:
 - `scripts/bridge_partition_resiliency_experiment.py`
-- commit: `8db37eb` (“test/exp: bridge partition resiliency experiment script (#65)”) 
+- commit: `8db37eb` (“test/exp: bridge partition resiliency experiment script”) 
 
 ## Findings (observed evidence)
 ### Output summary from the implemented runner (single run)
