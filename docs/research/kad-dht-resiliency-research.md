@@ -22,7 +22,7 @@ This document is expected to be appended by subsequent resiliency research ticke
 - Does libp2p Kad-DHT replicate PUTs across a unified overlay, or does placement remain constrained to the portion of the overlay the node effectively participates in?
 - Does durable store configuration (LMDB) change observed cross-network resiliency? When DHT retrieval fails, does fallback to local durable store mask cross-network availability failures?
 
-- [#67] When a multi-seed client performs a PUT into one network and then a GET for the same record, does the default client-side GET algorithm try the other network's seed(s) as fallback (i.e., does `get_signed_provider_record()` → `get_value(...)` scan across bootstrapped seeds, or does it only query the overlay it can route to at GET time)?
+- [#67 - RESOLVED] Default client-side GET does not scan/try alternate bootstrapped seeds as fallback during the same lookup. GET behavior is driven by the libp2p/Kad-DHT routing-table lookup for the key (closest-peer lookup / routing-table contents), so a record may be unreachable even when the client is connected to multiple seeds. A subsequent GET can succeed after bootstrapping to the “correct” network (routing table updates), but fallback-to-other-seed is not automatic.
 
 ## Relevant code facts (repo)
 ### Bridge / bootstrap behavior
@@ -135,3 +135,42 @@ Therefore, the PUT appears to be effectively placed/accepted into one overlay pa
    - check whether `node1b` can eventually discover records placed by `bridge` (time-to-availability)
    - check whether `node2b` can discover records after longer bridge uptime (routing convergence window)
 3. If available in the libp2p runtime used by this repo, vary DHT maintenance parameters and/or random walk settings to evaluate whether replication/lookup stabilization changes the result.
+
+### Additional evidence: Client-side GET fallback across seeds (#67)
+New local experiments executed (same local topology model: Network1 = seed1a + node1b, Network2 = seed2a + node2b):
+
+1) `scripts/get_multiseed_client_get_fallback_experiment.py`
+
+Question tested: client bootstraps to one seed vs both seeds, then performs GET for a record that was PUT into Network2 (via node2b).
+
+Recorded single-run results:
+- Sanity (record landed):
+  - node2b GET for `obj_hash_b`: `found=true` (first_found_after_s ≈ 0.00184)
+  - node1b GET for `obj_hash_b`: `found=false`
+- Scenario A (client bootstraps to Network1 only; GET):
+  - `found=false`
+- Scenario B (client bootstraps to both seeds; GET):
+  - `found=false`
+- Scenario C (client bootstraps to Network1 only; GET fails; then bootstrap Network2 and retry GET):
+  - first GET after seed1: `found=false`
+  - second GET after bootstrapping seed2: `found=true` (first_found_after_s ≈ 0.316)
+
+Interpretation:
+- Being connected/bootstrapped to multiple seeds does not force the GET to “try the other network” when the first routing-table lookup misses.
+- Successful retrieval after bootstrapping seed2 reflects routing-table / peer-contact convergence rather than an explicit alternate-seed fallback inside the GET call.
+
+2) `scripts/get_multiseed_client_put_then_get_experiment.py`
+
+Setup: same record PUT performed by a multi-seed client; probes check whether other nodes observe the record and whether the client can GET after disconnecting seeds.
+
+Observed single-run results:
+- PUT landing probe:
+  - node1b GET: `found=false`
+  - node2b GET: `found=false`
+- Client GET:
+  - GET while connected to seed1 + seed2: `found=true` (first_found_after_s ≈ 0.00204)
+  - after disconnecting seed2: `found=true` (first_found_after_s ≈ 0.00169)
+  - after disconnecting both seeds: `found=true` (first_found_after_s ≈ 0.00180)
+
+Interpretation:
+- In this repo’s current local Kad-DHT setup, client-performed PUTs may be sufficient for the client itself (client is within the responsible/serving set / local lookup path), while other nodes on the overlays may not observe the record. This can mask cross-network lookup behavior via self-contained availability.
