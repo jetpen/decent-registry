@@ -143,17 +143,17 @@ New local experiments executed (same local topology model: Network1 = seed1a + n
 
 Question tested: client bootstraps to one seed vs both seeds, then performs GET for a record that was PUT into Network2 (via node2b).
 
-Recorded single-run results:
+Recorded results (3 independent reruns; all consistent):
 - Sanity (record landed):
-  - node2b GET for `obj_hash_b`: `found=true` (first_found_after_s ≈ 0.00184)
+  - node2b GET for `obj_hash_b`: `found=true` (first_found_after_s: mean ≈ 0.00188s, range [0.00178s, 0.00203s])
   - node1b GET for `obj_hash_b`: `found=false`
 - Scenario A (client bootstraps to Network1 only; GET):
-  - `found=false`
+  - `found=false` (3/3)
 - Scenario B (client bootstraps to both seeds; GET):
-  - `found=false`
+  - `found=false` (3/3)
 - Scenario C (client bootstraps to Network1 only; GET fails; then bootstrap Network2 and retry GET):
-  - first GET after seed1: `found=false`
-  - second GET after bootstrapping seed2: `found=true` (first_found_after_s ≈ 0.316)
+  - first GET after seed1: `found=false` (3/3)
+  - second GET after bootstrapping seed2: `found=true` (first_found_after_s: mean ≈ 0.3166s, range [0.3150s, 0.3177s])
 
 Interpretation:
 - Being connected/bootstrapped to multiple seeds does not force the GET to “try the other network” when the first routing-table lookup misses.
@@ -163,14 +163,14 @@ Interpretation:
 
 Setup: same record PUT performed by a multi-seed client; probes check whether other nodes observe the record and whether the client can GET after disconnecting seeds.
 
-Observed single-run results:
+Observed results (3 independent reruns; all consistent):
 - PUT landing probe:
-  - node1b GET: `found=false`
-  - node2b GET: `found=false`
+  - node1b GET: `found=false` (3/3)
+  - node2b GET: `found=false` (3/3)
 - Client GET:
-  - GET while connected to seed1 + seed2: `found=true` (first_found_after_s ≈ 0.00204)
-  - after disconnecting seed2: `found=true` (first_found_after_s ≈ 0.00169)
-  - after disconnecting both seeds: `found=true` (first_found_after_s ≈ 0.00180)
+  - GET while connected to seed1 + seed2: `found=true` (first_found_after_s: mean ≈ 0.00189s, range [0.00182s, 0.00194s]) (3/3)
+  - after disconnecting seed2: `found=true` (first_found_after_s: mean ≈ 0.00192s, range [0.00173s, 0.00213s]) (3/3)
+  - after disconnecting both seeds: `found=true` (first_found_after_s: mean ≈ 0.00174s, range [0.00168s, 0.00178s]) (3/3)
 
 Interpretation:
 - In this repo’s current local Kad-DHT setup, client-performed PUTs may be sufficient for the client itself (client is within the responsible/serving set / local lookup path), while other nodes on the overlays may not observe the record. This can mask cross-network lookup behavior via self-contained availability.
