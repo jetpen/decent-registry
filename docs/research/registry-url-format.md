@@ -125,7 +125,7 @@ Proposed server-side behavior consistent with the #68 “primary/alias” design
 - The server then fetches the primary identity record under:
   - `/decent-registry/identity/{primary_object_key_hex}`
 
-Note: the current v1 code does not implement parsing/validation of `payload.role` / `primary_link`; this route is specified as a v2 extension in routing/response semantics.
+Note: the current v1 code does not implement parsing/validation of `payload.role` / `primary_link`; this route is specified as a v2 extension in routing/response semantics. Until that validator logic exists, return `501 Not Implemented`; after implementation, malformed alias linkage returns `400 Bad Request` and a missing `primary_link` target returns `404 Not Found`.
 
 ### 3) Identity lookup by owner public key
 Route:
