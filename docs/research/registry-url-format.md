@@ -24,12 +24,12 @@ This doc specifies a *custom URL grammar* for a registry service that routes req
 ```
 
 Where:
-- `<scheme>` is a new, repo-specific identifier for the registry service (proposed: `decent-registry`).
+- `<scheme>` is a new, repo-specific identifier for the registry service (chosen: `kad`).
 - `<multiaddr>` is a valid libp2p multiaddr string that starts with `/`.
 - The delimiter `//` marks the end of the multiaddr and the beginning of the context path.
   - Rationale: network multiaddrs use `/proto/value` segments and normally do not contain empty segments; therefore `//` is an unambiguous boundary for the supported network transports.
   - Limitation: multiaddrs with empty path components, such as Unix-socket forms (`/unix//path`), would conflict with this delimiter. Either exclude those transports from v1 or replace the delimiter before implementation.
-  - Alternative rejected: `decent-registry://<multiaddr>/<context>` is problematic because `<multiaddr>` begins with `/` and would be parsed as an “authority” component by conventional URI parsers, making boundary detection ambiguous.
+  - Alternative rejected: `kad://<multiaddr>/<context>` is problematic because `<multiaddr>` begins with `/` and would be parsed as an “authority” component by conventional URI parsers, making boundary detection ambiguous.
 - `<context-path>` starts at the first path segment after the delimiter.
 - `<query>` is optional; this doc does not define query parameters beyond reserving space for future options (e.g., `quorum`).
 
@@ -182,19 +182,19 @@ Let an Ed25519 pubkey be:
 - `<PK> = 1111111111111111111111111111111111111111111111111111111111111111`
 
 1) Hash-only lookup:
-- `decent-registry:<MA>//by-hash/<H>`
+- `kad:<MA>//by-hash/<H>`
 
 2) Identity by owner name:
-- `decent-registry:<MA>//identity/by-name/alice`
+- `kad:<MA>//identity/by-name/alice`
 
 3) Identity by alias:
-- `decent-registry:<MA>//identity/by-alias/alice-alias`
+- `kad:<MA>//identity/by-alias/alice-alias`
 
 4) Provider record:
-- `decent-registry:<MA>//provider/by-hash/<H>`
+- `kad:<MA>//provider/by-hash/<H>`
 
 5) Redirect to target object URL:
-- `decent-registry:<MA>//provider/by-hash/<H>/redirect`
+- `kad:<MA>//provider/by-hash/<H>/redirect`
 
 ## Future extension points (non-normative)
 - Add optional query params (e.g., `?quorum=1`) to control DHT fetch quorum.
@@ -202,7 +202,7 @@ Let an Ed25519 pubkey be:
 - Add a reverse-index mechanism for `identity/by-owner-pubkey/*`.
 
 ## Open decisions
-- Confirm the scheme name `decent-registry` before implementation.
+- Scheme name `kad` confirmed for implementation.
 - Confirm that the registry node exposes an HTTP(S)-compatible request surface for resolving these URLs.
 - Confirm the custom `//` delimiter and custom-parser requirement, including the `/unix//path` limitation.
 - Confirm whether redirect uses `302 Found` or `303 See Other`; this research chooses `302`.

@@ -1,10 +1,10 @@
-# Research: Chromium extension for resolving `decent-registry:<MA>//<context>` and rendering objects (#70)
+# Research: Chromium extension for resolving `kad:<MA>//<context>` and rendering objects (#70)
 
 ## Problem statement
 Given a URL in the repo-defined grammar (from `docs/research/registry-url-format.md`), a Chromium browser should be able to fetch/resolve it and render the target object in the browser.
 
 Repo URL grammar (v0 proposal):
-- `decent-registry:<multiaddr>//<context-path>[?<query>]`
+- `kad:<multiaddr>//<context-path>[?<query>]`
 - Multiaddr ends at the first literal `//`.
 - Custom parsing is required (cannot rely on standard URI “authority” parsing).
 
@@ -30,7 +30,7 @@ Chromium WebExtensions do not provide a `protocol_handlers` manifest key (that k
 
 This statement is a Chrome-extension capability boundary, not an implementation detail: MV3 extension manifests do not define a generic `protocol_handlers` field.
 
-Consequence: the browser cannot be taught (by an extension alone) to treat raw `decent-registry:` links typed into the address bar or opened by the OS as HTTP content.
+Consequence: the browser cannot be taught (by an extension alone) to treat raw `kad:` links typed into the address bar or opened by the OS as HTTP content.
 
 Sources:
 - Chrome PWA URL protocol handlers: https://developer.chrome.com/docs/web-platform/best-practices/url-protocol-handler
@@ -44,7 +44,7 @@ Navigator.registerProtocolHandler() is a web/PWA API:
 
 Source: https://developer.mozilla.org/en-US/docs/Web/API/Navigator/registerProtocolHandler
 
-Therefore: an extension must not rely on intercepting navigation to `decent-registry:` via network APIs.
+Therefore: an extension must not rely on intercepting navigation to `kad:` via network APIs.
 
 ## Key enabling fact from this repo
 Provider payload includes `provider_url` and endpoints.
@@ -52,12 +52,12 @@ Provider payload includes `provider_url` and endpoints.
 Source: `src/decent_registry/provider_schema.py` (`_validate_object_url`)
 
 Therefore a practical rendering path is:
-1) Resolve the `decent-registry:` URL to either a provider record or directly a redirect.
+1) Resolve the `kad:` URL to either a provider record or directly a redirect.
 2) Navigate or fetch the returned `provider_url` using normal browser HTTP(S).
 
 ## Recommended extension architecture (MV3)
 ### Overview
-Use a **content script** to capture `decent-registry:` links on regular web pages, and a **service worker** to resolve them via a **local bridge**.
+Use a **content script** to capture `kad:` links on regular web pages, and a **service worker** to resolve them via a **local bridge**.
 
 Recommended bridge choices (either):
 - **A. Local HTTP gateway** (best UX + simplest rendering):
@@ -107,7 +107,7 @@ Given repo constraints, object bytes should generally come from `provider_url` o
 
 ## Rendering strategy (two modes)
    ### Mode A: Navigation (recommended)
-   - Resolve `decent-registry:` → `provider_url` (or redirect `Location`).
+   - Resolve `kad:` → `provider_url` (or redirect `Location`).
    - Let Chromium perform the GET for the returned `provider_url` using normal browser navigation.
    - Pros: no extension-side MIME handling, CSP/CORS handled by the browser as usual.
 
@@ -120,20 +120,20 @@ Given repo constraints, object bytes should generally come from `provider_url` o
    Content scripts only run on matching web pages and can intercept link activations in those pages.
    They cannot reliably intercept:
    - URLs typed directly in the browser address bar, or
-   - OS-level handling of `decent-registry:` links.
+   - OS-level handling of `kad:` links.
 
    Therefore support typed URLs via the extension omnibox keyword (see “Omnibox support”).
 
 ## End-to-end example (navigation mode)
    Assume:
-   - registry URL to resolve: `decent-registry:/ip4/127.0.0.1/tcp/9000/p2p/<PEERID>//provider/by-hash/<H>/redirect`
+   - registry URL to resolve: `kad:/ip4/127.0.0.1/tcp/9000/p2p/<PEERID>//provider/by-hash/<H>/redirect`
    - DHT route `/decent-registry/provider/<H>` holds a provider record whose `provider_url` is `https://example.com/object.bin`.
 
    Flow:
    1) User clicks a link with that `href` on a normal HTTPS page.
-   2) Content script prevents default navigation and sends the raw `decent-registry:` URL to the service worker.
+   2) Content script prevents default navigation and sends the raw `kad:` URL to the service worker.
    3) Service worker parses it using the grammar in `docs/research/registry-url-format.md`.
-   4) Service worker calls the local bridge: `GET /resolve?url=<encoded decent-registry url>`.
+   4) Service worker calls the local bridge: `GET /resolve?url=<encoded kad: URL>`.
    5) Bridge performs the DHT GET and returns `{ "redirect": "https://example.com/object.bin" }`.
    6) Service worker opens a tab to `https://example.com/object.bin` (Chromium does the actual GET + rendering).
 
@@ -142,10 +142,10 @@ Given repo constraints, object bytes should generally come from `provider_url` o
 
 Pseudocode:
 ```
-parse_decent_registry_url(raw):
+parse_kad_url(raw):
   # 1. split at first ':'
   scheme, rest = split_once(raw, ':')
-  assert scheme == "decent-registry"
+  assert scheme == "kad"
 
   # 2. split rest at first literal '//' into multiaddr + context_query
   multiaddr, after = split_once(rest, '//')
@@ -194,7 +194,7 @@ Goal: keep extension logic simple; treat the DHT resolution as a local RPC.
 Connectivity requirement:
 - Repo `decent-registry node` is libp2p-only (no HTTP server surface in this codebase).
 - The extension bridge must therefore run a local HTTP(S) endpoint (e.g. `http://127.0.0.1:<port>/resolve?...`) that:
-  1) parses the `decent-registry:` URL (multiaddr + context path),
+  1) parses the `kad:` URL (multiaddr + context path),
   2) dials the peer identified by the multiaddr,
   3) performs the Kad-DHT GET under the correct namespace key(s), and
   4) returns a JSON response containing either `provider_url` or a redirect target.
@@ -240,7 +240,7 @@ Recommended use case:
 Minimal MV3 concepts (pseudo):
 
 - service worker (background): parses and resolves
-- content script: intercepts `a[href^="decent-registry:"]` clicks
+- content script: intercepts `a[href^="kad:"]` clicks
 - permissions:
   - `nativeMessaging` (only if using option B)
   - `tabs` (if you need to create tabs / inspect tab state)
@@ -271,7 +271,7 @@ References:
 
 ## Omnibox support (optional but recommended UX)
 To allow users to paste/type the raw scheme URL into Chrome’s address bar and have the extension resolve it, add:
-- `"omnibox": { "keyword": "decent" }` in the extension manifest
+- `"omnibox": { "keyword": "kad" }` in the extension manifest
 - `chrome.omnibox.onInputEntered` handler that opens a new tab to `provider_url` after resolution.
 
 Source: https://developer.chrome.com/docs/extensions/reference/api/omnibox
