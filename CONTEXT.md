@@ -40,6 +40,39 @@ _Avoid_: CBOR
 **Ed25519**: The signature scheme used to sign and verify SignedUpdate digest input.
 _Avoid_: EdDSA, Curve25519
 
+**Registry**: The implemented service that stores and resolves signed Identity Records and Provider Records over libp2p Kad-DHT.
+_Avoid_: central registry
+
+**Companion Service**: A proposed ecosystem service concept that builds on or extends the Registry; Identity, Storage, and Social are companion-service concepts.
+_Avoid_: companion protocol
+
+**Identity Graph**: A set of related Identity Records representing one owner's primary identity, aliases, and public keys.
+_Avoid_: identity profile
+
+**Social Graph**: A set of relationship records linking an owner to other users, foundational to future messaging, collaboration, and social applications.
+_Avoid_: friends list
+
+**Storage Service**: A proposed convention for durable, content-addressable data retention, distinct from the Registry's LMDB datastore and DHT record replication.
+_Avoid_: object store
+
+**Signer Set**: The distinct public keys authorized to sign updates under a threshold policy, together with the associated threshold and epoch.
+_Avoid_: keyring
+
+**Multisignature Bundle**: A bundle of record updates circulated among private-key holders for local signing and submitted to the Registry only after the required number of distinct signatures is collected.
+_Avoid_: transaction, batch
+
+**Recovery Policy**: A separately enrolled authorization path, distinct from ordinary threshold authorization, for identity control after lost or compromised keys.
+_Avoid_: emergency override
+
+**Claim Class**: The mandatory classification of a documentation claim as implemented and code-backed, documented or researched but unimplemented, proposed design, or long-term vision.
+_Avoid_: status label
+
+**Ecosystem Goal**: A stated objective such as sovereignty, privacy, anti-centralization, or anti-censorship; an aim, not a current guarantee.
+_Avoid_: capability guarantee
+
+**Decentralized**: The operational property that no single organization is required to coordinate or control the Registry, independent parties can operate nodes, and clients can verify records end-to-end without trusting a single operator. This term does not by itself promise censorship resistance, privacy, availability, or anonymity.
+_Avoid_: censorship-proof
+
 ## Rules
 
 - **Overwrite rules**: For a fixed DHT key, later updates are accepted only if the SignedUpdate is valid, the signature verifies, Seq strictly increases, and Owner Binding is consistent.
