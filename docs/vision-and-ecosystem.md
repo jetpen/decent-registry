@@ -73,7 +73,7 @@ The long-term vision is to give people more control over the services and record
 
 The project’s Ecosystem Goals include:
 
-- increasing user control over identity and service relationships;
+- increasing user control and privacy over identity and service relationships;
 - reducing unnecessary centralization;
 - allowing independently operated infrastructure;
 - enabling clients to verify signed information without trusting a single operator; and
