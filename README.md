@@ -24,6 +24,12 @@ Conclusion: for any foreseeable number of identity/provider records, SHA-256 key
 
 ## Documentation
 
+### Ecosystem and user documentation
+
+- [Vision and ecosystem](docs/vision-and-ecosystem.md)
+
+### Operator and integrator documentation
+
 - Protocol concepts: [`docs/protocol-concepts.md`](docs/protocol-concepts.md)
 - Server setup:
   - [`docs/single-node-server-setup.md`](docs/single-node-server-setup.md)
