@@ -27,6 +27,7 @@ Conclusion: for any foreseeable number of identity/provider records, SHA-256 key
 ### Ecosystem and user documentation
 
 - [Vision and ecosystem](docs/vision-and-ecosystem.md)
+- [Companion services](docs/companion-services.md)
 
 ### Operator and integrator documentation
 
