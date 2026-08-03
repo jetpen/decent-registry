@@ -6,7 +6,7 @@
 
 ## Decision summary
 
-The scenario documentation will cover eight scenario groups. Every scenario uses the same template and one of the four claim classes established by [Vision narrative and claims policy](vision-narrative-and-claims-policy.md): implemented and code-backed; documented or researched but unimplemented; proposed design; or long-term vision.
+The scenario documentation will cover nine scenario groups. Every scenario uses the same template and one of the four claim classes established by [Vision narrative and claims policy](vision-narrative-and-claims-policy.md): implemented and code-backed; documented or researched but unimplemented; proposed design; or long-term vision.
 
 ## Scenario template
 
@@ -120,6 +120,17 @@ Each scenario uses these fields:
 - **Current-versus-future status:** Implemented and code-backed for signed Provider Records, put/get, sequence monotonicity, and owner-collision rejection; see the [single-node setup](../single-node-server-setup.md) and [multi-node setup](../multi-node-cluster-setup.md) guides; exercised end to end by the gated acceptance test `tests/test_acceptance_object_url.py`. The hosting, takedown, and re-hosting steps are illustrative narratives over these existing interfaces.
 - **Limitations:** No host-retention guarantees; clients must verify the Object Hash; the owner must retain the signing key; old URLs are overwritten, not retained as history; stale pointers may persist during propagation.
 
+### 9. Publish and resolve a web-page `kad:` link through a Chromium extension
+
+- **Status class:** Documented or researched but unimplemented.
+- **Actors:** A content publisher, an end user, a Chromium browser with the proposed extension, Registry nodes, and a host provider.
+- **Motivation:** Publish a stable Object Hash reference in a web page while allowing the target object to move between providers.
+- **Flow:** The publisher embeds `kad:<bootstrap-multiaddr>//provider/by-hash/<object-hash>`. The extension parses the URL, uses a proposed local bridge to resolve the Provider Record from the Registry, verifies the signed record, and navigates to its validated `provider_url`. After a host takedown, the owner re-hosts the identical bytes and publishes a higher-`Seq` Provider Record, so the same `kad:` link resolves to the new provider URL.
+- **Services involved:** Web page, proposed Chromium extension, proposed local resolution bridge, Registry, and external HTTP(S) hosting.
+- **Sovereignty and privacy properties:** The publisher chooses the Registry bootstrap multiaddr, while the owner controls authorized Provider Record updates. Object addressing decouples discovery from a single host, but public records and resolution requests may be observable and provide no anonymity or private-by-default publication.
+- **Current-versus-future status:** Provider Record put/get mechanics are implemented; the web-page link convention, Chromium extension, local bridge, and end-to-end browser flow are documented or researched but unimplemented. The current Registry node is libp2p-only and does not provide the proposed HTTP-compatible resolution surface.
+- **Limitations:** No extension or local bridge is shipped. A browser cannot be assumed to understand `kad:` without the proposed integration. The Registry cannot guarantee provider availability, host persistence, re-hosting success, or censorship resistance. Clients must verify downloaded bytes against the Object Hash.
+
 ## Documentation rules
 
 - Use the four claim classes consistently.
@@ -140,6 +151,7 @@ The interactive grilling confirmed:
 3. The multisignature scenario uses the bundle flow: draft, circulate, local signing, collect two distinct signatures, reject partial bundles, and submit the final bundle.
 4. The multisignature flow is researched but unimplemented and must not imply current CLI support.
 5. Issue #83 extended the catalog with an eighth scenario: Re-host a censored document under a stable content hash.
+6. Issue #84 extended the catalog with a ninth scenario: Publish and resolve a web-page `kad:` link through a Chromium extension.
 
 This artifact resolves #75. It does not resolve developer-guide structure (#77).
 

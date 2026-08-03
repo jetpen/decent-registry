@@ -213,6 +213,33 @@ Current implementation details are linked to the canonical protocol, setup, conf
 
 **Limitations:** The Registry cannot force a host to retain content or restore a removed URL. Clients must compute the Object Hash of downloaded bytes and compare it with the Object Hash in the record to detect a mismatched or forged copy. The owner must retain the signing key to repoint the record; key recovery is separate research. The record is a live pointer, so the old URL is overwritten rather than retained as guaranteed history. Stale pointers may persist in intermediate caches until the new record propagates.
 
+## 9. Publish and resolve a web-page `kad:` link through a Chromium extension
+
+**Claim Class:** Documented or researched but unimplemented.
+
+**Actors:** A content publisher embedding a link in a web page, an end user, a Chromium browser with the proposed extension installed, Registry nodes, and a host provider serving the target object.
+
+**Motivation:** Let a web page publish a stable content-addressed link whose target can be found even when its host provider changes. The Registry supplies indirection between the Object Hash and the current provider URL, allowing content to move elsewhere without changing the discovery reference.
+
+**User flow:**
+
+1. A publisher embeds a link such as `kad:<bootstrap-multiaddr>//provider/by-hash/<object-hash>` in a web page. The URL contains the Registry bootstrap multiaddr and the target object’s SHA-256 Object Hash.
+2. An end user browses that page in Chromium with the proposed extension installed and activates the `kad:` link.
+3. The extension intercepts the link activation and parses the custom URL using the grammar in [Registry service URL format](research/registry-url-format.md). The multiaddr is a bootstrap multiaddr containing `/p2p/<peerid>`; it is not an HTTP authority component.
+4. Through the proposed local HTTP gateway or native-messaging bridge, the extension connects to the Registry using the bootstrap multiaddr and requests the Provider Record for the Object Hash. The browser-extension architecture and its limitations are described in [Chromium extension DHT URL resolution research](research/browser-extension-dht-url-rendering.md).
+5. The Registry returns the signed Provider Record, which includes the validated `provider_url` of the target object and provider endpoint information, following [Publish and resolve a signed Provider Record](#1-publish-and-resolve-a-signed-provider-record). The extension or bridge verifies the `SignedEnvelope` and Provider Record before using the URL. The terminology and implementation boundaries follow [`CONTEXT.md`](../CONTEXT.md).
+6. The extension opens or navigates a browser tab to the returned HTTP(S) `provider_url`, causing Chromium to perform the ordinary GET and render the target object.
+7. The client may recompute the SHA-256 digest of downloaded bytes and compare it with the Object Hash to detect a mismatched or forged copy.
+8. If a host provider is pressured to remove the object, the owner re-hosts the identical bytes elsewhere and publishes a higher-`Seq` Provider Record for the same Object Hash. The original `kad:` link remains unchanged; a later resolution returns the new provider URL. This is the same stable-reference principle described in [Re-host a censored document under a stable content hash](#8-re-host-a-censored-document-under-a-stable-content-hash).
+
+**Services involved:** A web page, the proposed Chromium extension, a proposed local resolution bridge, the implemented Registry and its Provider Record path, and ordinary HTTP(S) object hosting.
+
+**Sovereignty and privacy properties:** A publisher can choose the bootstrap Registry multiaddr embedded in a link, and a content owner controls authorized Provider Record updates through the signing key and `Seq` rules. Content addressing decouples the Object Hash from one host and can make re-hosting fluid. Provider Records and link-resolution requests are public or observable according to deployment; this scenario provides no anonymity or private-by-default publication. Decentralized operation does not by itself guarantee censorship resistance, availability, or host persistence.
+
+**Current-versus-future status:** The Provider Record put/get mechanics are implemented through the [Provider Record examples](provider-put-get-examples.md), [protocol concepts](protocol-concepts.md), [multi-node setup](multi-node-cluster-setup.md), and [client key configuration](client-keygen-cli-config.md) guides. The gated `tests/test_acceptance_object_url.py` acceptance test provides supporting evidence for those mechanics when run with `DECENT_REGISTRY_RUN_ACCEPTANCE=1`. The web-page `kad:` link convention, Chromium extension, local bridge, and end-to-end browser flow are documented or researched but unimplemented. The current Registry node is libp2p-only; the HTTP-compatible resolution surface described in the research is a future implementation boundary.
+
+**Limitations:** No Chromium extension or local bridge is shipped. A web page cannot assume that browsers understand `kad:` without the proposed integration. The Registry cannot force a provider to retain content, restore a removed URL, or prevent censorship of every Registry node or provider. At least one reachable provider and a usable Registry path are required. Clients must verify downloaded bytes against the Object Hash. Provider Records are live pointers rather than guaranteed history, and public records are not private by default.
+
 ## Canonical documentation
 
 - [Vision and ecosystem](vision-and-ecosystem.md) explains project framing and claim policy.
