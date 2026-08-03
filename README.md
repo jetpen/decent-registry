@@ -30,6 +30,10 @@ Conclusion: for any foreseeable number of identity/provider records, SHA-256 key
 - [Companion services](docs/companion-services.md)
 - [End-user scenarios](docs/end-user-scenarios.md)
 
+### Application developer documentation
+
+- [Developer guide](docs/developer-guide.md)
+
 ### Operator and integrator documentation
 
 - Protocol concepts: [`docs/protocol-concepts.md`](docs/protocol-concepts.md)
