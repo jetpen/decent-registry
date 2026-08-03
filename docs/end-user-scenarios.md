@@ -185,6 +185,34 @@ Current implementation details are linked to the canonical protocol, setup, conf
 
 **Limitations:** Storage, social, identity-graph, and authorization conventions must be specified before a runnable cross-domain application can be claimed.
 
+## 8. Re-host a censored document under a stable content hash
+
+**Claim Class:** Implemented and code-backed for the registry mechanics — signed Provider Records, `put provider`/`get provider`, sequence monotonicity, and owner-collision rejection. The hosting and censorship narrative is illustrative.
+
+**Actors:** A content owner, a public cloud hosting provider, a hostile actor such as a state authority pressuring the host, and end-user clients.
+
+**Motivation:** Demonstrate censorship resistance through content addressing. A document’s identity is its SHA-256 hash, independent of its hosting location. If a host is pressured to remove the file, the owner can re-host the identical bytes elsewhere and repoint the registry record; the public finds the document again under the same lookup key and verifies that the bytes are unchanged.
+
+**User flow:**
+
+1. The owner computes the SHA-256 hash `H` of a document. `H` identifies the content regardless of hosting location.
+2. The owner uploads the document to public cloud infrastructure and obtains `URL_A`.
+3. The owner publishes a signed Provider Record for object hash `H` with `provider_url = URL_A`, endpoint information, and an Ed25519 signature at `seq = 1`, following [Publish and resolve a signed Provider Record](#1-publish-and-resolve-a-signed-provider-record), the [Provider Record examples](provider-put-get-examples.md) flow, and the [Client key configuration](client-keygen-cli-config.md) guidance.
+4. A client resolves the record with `get provider --object-hash H`, verifies the signature, downloads from `URL_A`, and confirms that the downloaded bytes hash to `H`.
+5. A hostile actor pressures the cloud provider, and `URL_A` stops serving the file, for example with a 404, 403, or 410 response.
+6. The registry entry is unaffected: the DHT stores the signed pointer, not the file content. Censoring the hosting does not remove the registry record.
+7. The owner uses a backup to re-host the identical bytes on different infrastructure at `URL_B`. The object hash remains `H`.
+8. The owner publishes an updated Provider Record for the same object hash, using the same owner key and a strictly increasing `seq = 2` with `provider_url = URL_B`. The registry accepts the update through the sequence-monotonic overwrite path because the owner key is unchanged.
+9. A client resolves the same key again and receives `URL_B`. The public downloads the file at its new location and recomputes the SHA-256 hash to confirm it is the same document.
+
+**Services involved:** The implemented Registry (`put provider`/`get provider`, canonical CBOR signed envelopes, and local Ed25519 signing) plus ordinary public web hosting external to the Registry.
+
+**Sovereignty and privacy properties:** Content addressing decouples a document’s identity from any single host, so availability is not tied to one provider’s willingness to serve. Under the owner-collision rule, only the owner’s key can repoint the record. Clients can verify that downloaded bytes match the object hash. The Registry stores signed pointers rather than file content, limiting its own censorship surface. A public record is not private by default.
+
+**Current-versus-future status:** Implemented and code-backed for signed Provider Records, `put provider`/`get provider`, sequence monotonicity, and owner-collision rejection — see [Protocol concepts](protocol-concepts.md) and [Provider Record examples](provider-put-get-examples.md). The provider put/get path is also exercised end to end by the gated acceptance test `tests/test_acceptance_object_url.py`, run with `DECENT_REGISTRY_RUN_ACCEPTANCE=1`. The hosting, takedown, and re-hosting steps are illustrative narratives over these existing interfaces.
+
+**Limitations:** The Registry cannot force a host to retain content or restore a removed URL. Clients must hash downloaded bytes and compare them with the object hash to detect a mismatched or forged copy. The owner must retain the signing key to repoint the record; key recovery is separate research. The record is a live pointer, so the old URL is overwritten rather than retained as guaranteed history. Stale pointers may persist in intermediate caches until the new record propagates.
+
 ## Canonical documentation
 
 - [Vision and ecosystem](vision-and-ecosystem.md) explains project framing and claim policy.
@@ -202,5 +230,5 @@ Private keys must never be displayed, logged, transmitted as Registry content, o
 
 ## Verification
 
-The documentation-only change was verified with `.venv/bin/pytest -q`: 56 passed, 1 skipped.
+The documentation-only changes were verified with `.venv/bin/pytest -q`: 56 passed, 1 skipped. The gated downloadable-object acceptance test (`tests/test_acceptance_object_url.py`) also passes when run with `DECENT_REGISTRY_RUN_ACCEPTANCE=1`.
 
