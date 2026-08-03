@@ -111,14 +111,14 @@ Each scenario uses these fields:
 
 ### 8. Re-host a censored document under a stable content hash
 
-- **Status class:** Implemented and code-backed for the registry mechanics; the hosting and censorship narrative is illustrative.
+- **Status class:** Implemented and code-backed.
 - **Actors:** Content owner, public cloud hosting provider, hostile actor (such as a state authority) pressuring the host, and end-user clients.
-- **Motivation:** Demonstrate censorship resistance through content addressing: the document’s SHA-256 hash is stable across hosting locations, so the owner can re-host the identical bytes after a takedown and repoint the signed Provider Record.
-- **Flow:** The owner hashes the document (`H`), hosts it at `URL_A`, and publishes a signed Provider Record (`seq = 1`). Clients resolve, verify, download, and hash-verify. The host is pressured into a takedown; the registry pointer is unaffected. The owner re-hosts the identical bytes at `URL_B` and publishes `seq = 2` under the same owner key. Clients resolve the same key to the new URL and verify the content hash.
+- **Motivation:** Demonstrate censorship resistance through content addressing: the document’s Object Hash is stable across hosting locations, so the owner can re-host the identical bytes after a takedown and repoint the signed Provider Record.
+- **Flow:** The owner computes the Object Hash of the document (`H`), hosts it at `URL_A`, and publishes a signed Provider Record (`seq = 1`). Clients resolve, verify, download, and compare the downloaded bytes with the Object Hash. The host is pressured into a takedown; the registry pointer is unaffected. The owner re-hosts the identical bytes at `URL_B` and publishes `seq = 2` under the same owner key. Clients resolve the same key to the new URL and verify the Object Hash.
 - **Services involved:** Registry; external public web hosting.
-- **Sovereignty and privacy properties:** Availability is decoupled from any single host; only the owner’s key can repoint the record; clients verify content by hash; the Registry stores pointers, not content. Public records are not private by default.
-- **Current-versus-future status:** Implemented and code-backed for signed Provider Records, put/get, sequence monotonicity, and owner-collision rejection; exercised end to end by the gated acceptance test `tests/test_acceptance_object_url.py`.
-- **Limitations:** No host-retention guarantees; clients must hash-verify; the owner must retain the signing key; old URLs are overwritten, not retained as history; stale pointers may persist during propagation.
+- **Sovereignty and privacy properties:** Availability is decoupled from any single host; only the owner’s key can repoint the record; clients verify content against the Object Hash; the Registry stores pointers, not content. Public records are not private by default.
+- **Current-versus-future status:** Implemented and code-backed for signed Provider Records, put/get, sequence monotonicity, and owner-collision rejection; see the [single-node setup](../single-node-server-setup.md) and [multi-node setup](../multi-node-cluster-setup.md) guides; exercised end to end by the gated acceptance test `tests/test_acceptance_object_url.py`. The hosting, takedown, and re-hosting steps are illustrative narratives over these existing interfaces.
+- **Limitations:** No host-retention guarantees; clients must verify the Object Hash; the owner must retain the signing key; old URLs are overwritten, not retained as history; stale pointers may persist during propagation.
 
 ## Documentation rules
 
@@ -139,7 +139,7 @@ The interactive grilling confirmed:
 2. Every scenario uses the confirmed template fields above.
 3. The multisignature scenario uses the bundle flow: draft, circulate, local signing, collect two distinct signatures, reject partial bundles, and submit the final bundle.
 4. The multisignature flow is researched but unimplemented and must not imply current CLI support.
-5. Issue #83 later extended the catalog with an eighth scenario: Re-host a censored document under a stable content hash.
+5. Issue #83 extended the catalog with an eighth scenario: Re-host a censored document under a stable content hash.
 
 This artifact resolves #75. It does not resolve developer-guide structure (#77).
 
