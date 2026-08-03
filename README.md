@@ -28,6 +28,7 @@ Conclusion: for any foreseeable number of identity/provider records, SHA-256 key
 
 - [Vision and ecosystem](docs/vision-and-ecosystem.md)
 - [Companion services](docs/companion-services.md)
+- [End-user scenarios](docs/end-user-scenarios.md)
 
 ### Operator and integrator documentation
 
