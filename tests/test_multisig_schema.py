@@ -149,6 +149,22 @@ def test_provider_multisignature_envelope_round_trip_preserves_signed_bytes():
         signed_update_bytes=signed_update,
         proofs=[{1: "signer-a", 2: SIG_A}],
     )
+    assert signed_update.hex() == (
+        "a401a1015820000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        "02a501674564323535313902010378406162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616204781a68747470733a2f2f6578616d706c652e636f6d2f6f626a6563740581772f6970342f3132372e302e302e312f7463702f39303030030804a7010102020302040705020683"
+        "a201687369676e65722d61025820000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        "a201687369676e65722d620258200102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        "20a201687369676e65722d6302582002030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        "21075820202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+    )
+    assert envelope.hex() == (
+        "a301010259016aa401a1015820000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        "02a501674564323535313902010378406162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616204781a68747470733a2f2f6578616d706c652e636f6d2f6f626a6563740581772f6970342f3132372e302e302e312f7463702f39303030030804a7010102020302040705020683"
+        "a201687369676e65722d61025820000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        "a201687369676e65722d620258200102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        "20a201687369676e65722d6302582002030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        "21075820202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f0381a201687369676e65722d61025840000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+    )
 
     decoded = decode_multisignature_envelope(envelope)
     assert decoded.signed_update_bytes == signed_update
@@ -320,6 +336,31 @@ def test_multisignature_envelope_is_not_accepted_by_legacy_decoder():
     )
     with pytest.raises(ValueError, match="keys"):
         decode_signed_envelope(envelope)
+
+    legacy_like = cbor2.dumps({1: signed_update, 2: SIG_A}, canonical=True)
+    with pytest.raises(ValueError, match="legacy envelope"):
+        decode_signed_envelope(legacy_like)
+
+
+def test_decoder_rejects_wrong_record_kind_in_canonical_wire_bytes():
+    bad_authorization = authorization()
+    bad_authorization[2] = RECORD_KIND_PROVIDER
+    bad_authorization[6] = [
+        {1: "signer-a", 2: KEY_A},
+        {1: "signer-b", 2: KEY_B},
+        {1: "signer-c", 2: KEY_C},
+    ]
+    bad_update = cbor2.dumps(
+        {
+            1: {1: b"owner-name", 2: KEY_A},
+            2: {},
+            3: 8,
+            4: bad_authorization,
+        },
+        canonical=True,
+    )
+    with pytest.raises(ValueError, match="record_kind"):
+        decode_multisignature_signed_update(bad_update)
 
 
 def test_decoder_rejects_unsupported_version_and_unsorted_wire_values():

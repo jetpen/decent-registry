@@ -93,6 +93,16 @@ def decode_signed_envelope(envelope_cbor: bytes) -> Tuple[bytes, bytes]:
     if not isinstance(signature, (bytes, bytearray)):
         raise ValueError("signature must be bytes")
 
+    # Keep the legacy decoder from silently accepting a multisignature
+    # SignedUpdate inside the legacy envelope shape. Malformed legacy
+    # SignedUpdate bytes remain the responsibility of the legacy validator.
+    try:
+        nested_update = cbor2.loads(bytes(signed_update_bytes))
+    except Exception:
+        nested_update = None
+    if isinstance(nested_update, dict) and 4 in nested_update:
+        raise ValueError("legacy envelope cannot carry multisignature SignedUpdate")
+
     return bytes(signed_update_bytes), bytes(signature)
 
 

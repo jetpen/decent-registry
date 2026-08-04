@@ -175,6 +175,11 @@ Verification requires canonical CBOR:
 
 ### 6.1) Version-1 multisignature wire schema
 
+This section documents the versioned wire format and codec validation added by
+issue #92. It does not mean that multisignature state-machine authorization,
+CLI workflows, DHT integration, or production record validation are complete;
+those behaviors are implemented by later issues.
+
 The legacy envelope remains exactly:
 
 ```text
