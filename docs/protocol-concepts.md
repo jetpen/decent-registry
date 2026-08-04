@@ -171,7 +171,67 @@ The stored DHT value is a canonical CBOR envelope:
 
 Verification requires canonical CBOR:
 - SignedEnvelope must be canonical (`is_canonical_cbor(envelope_cbor)`)
-- SignedUpdate bytes inside the envelope must also be canonical (`decode_canonical_signed_update`) 
+- SignedUpdate bytes inside the envelope must also be canonical (`decode_canonical_signed_update`)
+
+### 6.1) Version-1 multisignature wire schema
+
+This section documents the versioned wire format and codec validation added by
+issue #92. It does not mean that multisignature state-machine authorization,
+CLI workflows, DHT integration, or production record validation are complete;
+those behaviors are implemented by later issues.
+
+The legacy envelope remains exactly:
+
+```text
+SignedEnvelope = { 1: signed_update_bytes, 2: signature }
+```
+
+The explicit-signer version-1 envelope is a separate shape and is never
+interpreted as a legacy envelope:
+
+```text
+SignedEnvelopeV1 = {
+  1: 1,                         # envelope version
+  2: signed_update_bytes,
+  3: [ { 1: signer_id, 2: signature }, ... ]
+}
+```
+
+The versioned envelope carries one canonical SignedUpdate. Its shared
+authorization map is SignedUpdate key `4`:
+
+```text
+SignedUpdate = {
+  1: record_fields,
+  2: payload,
+  3: seq,
+  4: authorization,
+}
+
+authorization = {
+  1: 1,                         # explicit independent Ed25519 scheme
+  2: record_kind,               # 1 identity, 2 provider
+  3: operation,                 # 1 genesis, 2 ordinary, 3 replace, 4 upgrade
+  4: epoch,
+  5: threshold,
+  6: [ { 1: signer_id, 2: public_key }, ... ],
+  7: predecessor_state_hash,   # exactly 32 bytes
+}
+```
+
+Signer identifiers are UTF-8 text. Public keys are 32-byte Ed25519 keys and
+signatures are 64-byte Ed25519 signatures. The signer set and proof collection
+are sorted by UTF-8 signer identifier before encoding; decoders reject
+non-canonical ordering, duplicate identifiers, duplicate public keys, malformed
+keys, invalid thresholds, unsupported envelope versions, unsupported schemes,
+and malformed maps. The authorization `record_kind` must match the Identity or
+Provider SignedUpdate structure. Proof membership, threshold authorization,
+epoch transitions, predecessor-state checks, and state installation belong to
+the authorization validator rather than this codec.
+
+Legacy `decode_signed_envelope` continues to decode only `{1,2}`. The
+multisignature decoder requires `{1,2,3}` and version `1`, so an old client
+cannot treat one multisignature proof as a legacy signature.
 
 ---
 
