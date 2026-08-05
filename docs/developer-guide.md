@@ -63,7 +63,7 @@ Private keys must never be displayed, logged, transmitted as Registry content, c
 
 ## 5. CLI integration with put/get examples
 
-The implemented CLI surface is `keygen`, `node`, `put identity`, `put provider`, `get identity`, and `get provider`. The full, tested workflows are in [Provider Record put/get examples](provider-put-get-examples.md) and [Identity Record put/get examples](identity-put-get-examples.md). The following commands show the interface shape without inventing deployment values.
+The implemented CLI surface is `keygen`, `node`, `bundle draft`, `bundle sign`, `bundle merge`, `bundle finalize`, `put identity`, `put provider`, `get identity`, and `get provider`. The full, tested legacy workflows are in [Provider Record put/get examples](provider-put-get-examples.md) and [Identity Record put/get examples](identity-put-get-examples.md). The implemented multisignature workflow is in [Multisignature Records and Migration](multisignature-records.md). The following commands show the interface shape without inventing deployment values.
 
 Start a node and copy its emitted bootstrap address:
 
@@ -214,7 +214,7 @@ Run the full repository suite from the project root:
 .venv/bin/pytest -q
 ```
 
-Pytest discovers tests from `tests/` as configured in `pyproject.toml`. The verified baseline for this guide is **56 passed, 1 skipped**.
+Pytest discovers tests from `tests/` as configured in `pyproject.toml`. The verified baseline for this guide is **115 passed, 1 skipped**.
 
 For an integration change, verify the affected single test or test module first, then run the full suite. Check signatures, Canonical CBOR, strict `Seq` behavior, Owner Binding, provider endpoint normalization, namespace derivation, and CLI exit behavior. The canonical Provider and Identity Record guides include runnable end-to-end scripts; use them for network workflows rather than inventing a parallel test procedure.
 
@@ -226,16 +226,16 @@ The following are not implemented interfaces, APIs, or protocols:
 - **Documented or researched but unimplemented:** Chromium extension rendering and DHT integration in [browser extension research](research/browser-extension-dht-url-rendering.md).
 - **Proposed design:** HTTP gateways and native-messaging bridges described by the [developer surface inventory](planning/developer-surface-inventory.md).
 - **Proposed design:** Identity Graphs, aliases, and reverse Owner Public Key lookup.
-- **Documented or researched but unimplemented:** Recovery conventions, including passkey, guardian, one-time recovery, and 2-of-3 multisignature authorization research in [identity recovery research](research/identity-recovery-research.md) and [2-of-3 multisig research](research/2-of-3-multisig-key-recovery.md).
+- **Documented or researched but unimplemented:** Separate Recovery Policy conventions, including passkey, guardian, one-time recovery, and key-replacement research in [identity recovery research](research/identity-recovery-research.md) and [2-of-3 multisig recovery research](research/2-of-3-multisig-key-recovery.md). The version-1 explicit-Ed25519 Bundle and finalized-record workflow is implemented; see [Multisignature Records and Migration](multisignature-records.md).
 - **Proposed design:** General-purpose Storage Services, Social Graphs, messaging, and collaborative services in [Companion services](companion-services.md).
 
-The CLI and Registry put/get surfaces do not currently support these production workflows. The Python package now provides local multisignature bundle operations; do not present research workflows or unimplemented CLI/DHT integration as current commands or APIs.
+The CLI and Registry provide the implemented version-1 explicit-Ed25519 multisignature workflow documented in [Multisignature Records and Migration](multisignature-records.md). Do not present research workflows—such as FROST, recovery policy, HTTP gateways, browser integrations, or Companion Service protocols—as current commands or APIs.
 
 ## 12. Limitations and boundaries
 
 - A bootstrap multiaddr contains a peer identity, and node identity persists with the node’s durable-store location; deployment operators must manage its lifecycle.
 - DHT routing, record availability, endpoint reachability, and replication depend on the deployment. Valid signatures do not guarantee availability, permanence, privacy, or anonymity.
-- Current Identity authorization is single-key. Recovery, Identity Graphs, signer sets, and multisignature bundles are not implemented.
+- Legacy Identity Records use single-key authorization. Version-1 multisignature Identity and Provider Records use explicit Ed25519 Signer Sets and threshold proofs; recovery policy, Identity Graphs, and FROST remain unimplemented.
 - Registry LMDB storage and DHT replication do not provide a general-purpose content Storage Service.
 - Public Identity and Provider Records are not private by default.
 - No HTTP gateway, browser extension, native-messaging bridge, Social Graph protocol, or production Companion Service protocol is implemented.

@@ -41,6 +41,7 @@ Conclusion: for any foreseeable number of identity/provider records, SHA-256 key
   - [`docs/single-node-server-setup.md`](docs/single-node-server-setup.md)
   - [`docs/multi-node-cluster-setup.md`](docs/multi-node-cluster-setup.md)
 - Client key generation + configuration: [`docs/client-keygen-cli-config.md`](docs/client-keygen-cli-config.md)
+- Multisignature records and migration: [`docs/multisignature-records.md`](docs/multisignature-records.md)
 - End-to-end examples:
   - [`docs/provider-put-get-examples.md`](docs/provider-put-get-examples.md)
   - [`docs/identity-put-get-examples.md`](docs/identity-put-get-examples.md)
@@ -69,9 +70,21 @@ To form a bootstrap destination from this output:
 bootstrap = <listen_multiaddr>/p2p/<peer_id>
 ```
 
+### `bundle`
+
+Creates and circulates a local **Multisignature Bundle** without centralizing private keys:
+
+- `decent-registry bundle draft identity ...`
+- `decent-registry bundle draft provider ...`
+- `decent-registry bundle sign --input <bundle> --signer-privkey <pem> --output <proof-bundle>`
+- `decent-registry bundle merge --input <bundle> --proof <proof-bundle> --output <merged-bundle>`
+- `decent-registry bundle finalize --input <merged-bundle> --output <signed-envelope>`
+
+`bundle sign` reads one local Ed25519 private-key PEM and emits a detached proof. `bundle merge` verifies proof binding, signer membership, duplicate rejection, and signature validity. `bundle finalize` requires the threshold or explicit legacy-owner upgrade proof rule. Partial bundles are local artifacts and must never be published. Signer replacement and explicit legacy upgrade are documented in [`docs/multisignature-records.md`](docs/multisignature-records.md), which contains the complete Identity and Provider workflows, wire format, migration rules, and compatibility matrix.
+
 ### `put`
 
-Publishes a **signed record** into the DHT.
+Publishes a **legacy single-key or finalized version-1 multisignature record** into the DHT.
 
 Usage:
 - `decent-registry put provider ...`
@@ -83,13 +96,20 @@ Usage:
 
 Publishes a signed **provider update** under `--object-hash` (the DHT key).
 
-Required:
+Common:
 - `--host`, `--port`, `--bootstrap`
 - `--object-hash <64-hex>`
+
+`legacy mode` requires:
 - `--provider-url <url>`
 - `--owner-privkey <owner_privkey_pem_path>`
 - `--seq <monotonic int>`
-- `--endpoint <multiaddr>` (repeatable; also accepts comma-separated)
+- optional `--endpoint <multiaddr>` (repeatable; also accepts comma-separated)
+
+Finalized mode requires:
+- `--finalized-envelope <path>`
+
+Finalized mode reads the Provider Record, sequence, and authorization from the finalized SignedEnvelope and cannot be combined with legacy signing arguments.
 
 Example:
 ```bash
@@ -105,7 +125,8 @@ decent-registry put provider \
 
 Notes:
 - `--endpoint` values must start with `/` and are normalized/sorted lexicographically before signing.
-- The stored value is a canonical-CBOR signed envelope; verification enforces signature validity and seq monotonicity.
+- `legacy mode` stores a canonical-CBOR legacy SignedEnvelope; finalized mode stores a validated SignedEnvelope. A finalized version-1 multisignature SignedEnvelope is produced by the Bundle workflow.
+- Verification enforces signature validity, lookup-key binding, Owner Binding, and strictly increasing `Seq` values.
 
 #### `put identity`
 
@@ -113,11 +134,18 @@ Publishes a signed **identity update** under the DHT key:
 
 - `object_key = sha256(owner_name_bytes)`
 
-Required:
+Common:
 - `--host`, `--port`, `--bootstrap`
 - `--owner-name <hex bytes>`
+
+`legacy mode` requires:
 - `--owner-privkey <owner_privkey_pem_path>`
 - `--seq <monotonic int>`
+
+Finalized mode requires:
+- `--finalized-envelope <path>`
+
+Finalized mode reads the Identity Record, sequence, and authorization from the finalized SignedEnvelope and cannot be combined with legacy signing arguments.
 
 Example:
 ```bash
@@ -128,6 +156,8 @@ decent-registry put identity \
   --owner-privkey <owner_privkey_pem_path> \
   --seq 1
 ```
+
+`legacy mode` creates a legacy SignedEnvelope. Finalized mode uses `--finalized-envelope` and accepts the versioned multisignature SignedEnvelope produced by the Bundle workflow without private-key material.
 
 ### `get`
 
@@ -145,8 +175,11 @@ Required:
 
 On success prints JSON:
 - `object_key`: the queried DHT key
+- `object_hash`
+- `alg` and payload `version`
 - `provider_url`
 - `endpoints`: normalized/sorted provider endpoints
+- `seq` and `authorization` for version-1 multisignature records; `authorization` includes the Signer Set, threshold, epoch, operation, predecessor-state hash, and accepted state hash
 
 On missing prints `not found` and exits non-zero.
 
@@ -161,6 +194,7 @@ On success prints JSON:
 - `owner_name`
 - `owner_public_key`
 - `seq`
+- `authorization` for version-1 multisignature records, including the Signer Set, threshold, epoch, operation, predecessor-state hash, and accepted state hash
 
 On missing prints `not found` and exits non-zero.
 

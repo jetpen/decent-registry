@@ -43,8 +43,8 @@ Each scenario uses these fields:
 - **Flow:** The owner generates or selects key material, creates an Identity Record, signs the `SignedUpdate`, publishes it, then creates a later update with a strictly higher `Seq` when changing supported record data.
 - **Services involved:** Registry; the basic Identity Record structure.
 - **Sovereignty and privacy properties:** Ownership is verified by signature; private keys remain local and are not registry content.
-- **Current-versus-future status:** The Identity Record and current single-key signing path are implemented.
-- **Limitations:** Current owner binding and validator rules do not provide the proposed identity graph, recovery, or multisignature workflows. Loss of the current private key prevents ordinary updates.
+- **Current-versus-future status:** Legacy single-key Identity Records and version-1 explicit-Ed25519 multisignature Identity Records are implemented. The workflow is documented in [`multisignature-records.md`](../multisignature-records.md).
+- **Limitations:** Identity Graphs and separate recovery policies remain future work. A legacy record depends on its Owner Public Key until explicit upgrade.
 
 ### 3. Establish an identity graph
 
@@ -81,8 +81,8 @@ Each scenario uses these fields:
 
 ### 6. Perform 2-of-3 multisignature Identity Record signing and updating
 
-- **Status class:** Documented or researched but unimplemented.
-- **Actors:** Three key holders (K1, K2, K3), an initiating owner or application, and the registry.
+- **Status class:** Implemented and code-backed.
+- **Actors:** Three key holders (K1, K2, K3), an initiating owner or application, and the Registry.
 - **Motivation:** Require collective authorization and permit replacement of one lost or compromised signer while two trustworthy signers remain.
 - **Flow:**
   1. The owner or application drafts a bundle of Identity Record updates, including the complete intended state transition.
@@ -95,8 +95,8 @@ Each scenario uses these fields:
   8. For a lost or compromised signer, the two remaining signers authorize a complete replacement signer set in one state transition.
 - **Services involved:** Registry and proposed Identity authorization convention.
 - **Sovereignty and privacy properties:** A single lost key does not necessarily prevent updates; collective authorization reduces dependence on one signer. Private-key secrecy remains absolute.
-- **Current-versus-future status:** The local Python bundle workflow is implemented and code-backed for drafting, local signing, proof merging, and threshold finalization. CLI commands, Registry put/get integration, and DHT submission remain future work.
-- **Limitations:** Two lost or compromised signers cannot be recovered through ordinary 2-of-3 authorization. CLI transport, recovery policy, application tooling, and production Registry integration require future design and implementation.
+- **Current-versus-future status:** The canonical version-1 wire format, local CLI Bundle workflow, finalized Identity and Provider Record submission, resolution metadata, explicit legacy upgrade, and signer replacement are implemented and documented in [`multisignature-records.md`](../multisignature-records.md).
+- **Limitations:** Two lost or compromised signers cannot be recovered through ordinary 2-of-3 authorization. Separate recovery policy, FROST, deployment, availability, privacy, and application tooling remain future work.
 
 ### 7. Build a cross-domain application
 
@@ -149,7 +149,7 @@ The interactive grilling confirmed:
 1. Scenario scope covers Registry, Identity, Storage, Social, a cross-domain application, and a dedicated 2-of-3 multisignature Identity Record scenario.
 2. Every scenario uses the confirmed template fields above.
 3. The multisignature scenario uses the bundle flow: draft, circulate, local signing, collect two distinct signatures, reject partial bundles, and submit the final bundle.
-4. The local Python multisignature bundle flow is code-backed; the CLI, Registry, and DHT flow remains future work and must not imply current CLI support.
+4. The version-1 CLI, Registry, and DHT multisignature flow is code-backed and documented in [`multisignature-records.md`](../multisignature-records.md); separate recovery policy remains future work.
 5. Issue #83 extended the catalog with an eighth scenario: Re-host a censored document under a stable content hash.
 6. Issue #84 extended the catalog with a ninth scenario: Publish and resolve a web-page `kad:` link through a Chromium extension.
 
@@ -157,7 +157,7 @@ This artifact resolves #75. It does not resolve developer-guide structure (#77).
 
 ## Verification
 
-The repository test baseline is `.venv/bin/pytest -q`: 56 passed, 1 skipped. This planning artifact makes no code or test changes.
+The repository test baseline is `.venv/bin/pytest -q`: 115 passed, 1 skipped. This planning artifact makes no code or test changes.
 
 ## Source inputs
 

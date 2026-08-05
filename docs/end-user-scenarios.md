@@ -58,9 +58,9 @@ Current implementation details are linked to the canonical protocol, setup, conf
 
 **Sovereignty and privacy properties:** Ownership is verified by signature, while private keys remain in local or hardware-backed storage. Published identity fields are visible to readers.
 
-**Current-versus-future status:** The Identity Record and current single-key signing path are implemented. See [Identity Record put/get examples](identity-put-get-examples.md) and [client key configuration](client-keygen-cli-config.md).
+**Current-versus-future status:** Legacy single-key Identity Records and version-1 explicit-Ed25519 multisignature Identity Records are implemented. See [Identity Record put/get examples](identity-put-get-examples.md), [client key configuration](client-keygen-cli-config.md), and [Multisignature Records and Migration](multisignature-records.md).
 
-**Limitations:** Current owner binding and validation do not provide the proposed identity graph, recovery, or multisignature workflows. Loss of the current private key prevents ordinary updates.
+**Limitations:** Identity Graphs and separate recovery policies remain future work. A legacy record still depends on its Owner Public Key until it is explicitly upgraded to a multisignature state.
 
 ## 3. Establish an Identity Graph
 
@@ -136,7 +136,7 @@ Current implementation details are linked to the canonical protocol, setup, conf
 
 ## 6. Perform 2-of-3 multisignature Identity Record signing and updating
 
-**Claim Class:** Documented or researched but unimplemented.
+**Claim Class:** Implemented and code-backed.
 
 **Actors:** Three key holders (K1, K2, and K3), an initiating owner or application, and the Registry.
 
@@ -150,16 +150,16 @@ Current implementation details are linked to the canonical protocol, setup, conf
 4. Signatures are collected until two distinct valid signatures are present.
 5. A partial bundle with fewer than two valid signatures is rejected and cannot be submitted as an authorized update.
 6. The final bundle of signed records is submitted to the Registry.
-7. The pure authorization validator verifies signer-set membership, target and predecessor-state binding, and sequence and epoch advancement; Registry integration remains future work.
-8. If one signer is lost or compromised, the two remaining signers authorize a complete replacement signer set in one state transition.
+7. The Registry verifies Signer Set membership, target and predecessor-state binding, record kind, lookup key, `Seq`, and epoch advancement before accepting the finalized SignedEnvelope.
+8. If one signer is lost or compromised, the remaining threshold authorizes a complete replacement Signer Set in one state transition, provided the current Signer Set can still meet its threshold.
 
 **Services involved:** The Registry and a proposed Identity authorization convention.
 
 **Sovereignty and privacy properties:** A single lost key does not necessarily prevent updates, and collective authorization reduces dependence on one signer. Private-key secrecy remains absolute; only public verification material and signatures are exchanged.
 
-**Current-versus-future status:** The local Python bundle workflow is implemented and code-backed for drafting, local signing, proof merging, and threshold finalization. CLI commands, Registry put/get integration, and DHT submission remain future work.
+**Current-versus-future status:** The canonical version-1 wire format, local CLI Bundle workflow, finalized Identity and Provider Record submission, resolution metadata, explicit legacy upgrade, and signer replacement are implemented. See [Multisignature Records and Migration](multisignature-records.md).
 
-**Limitations:** Two lost or compromised signers cannot be recovered through ordinary 2-of-3 authorization. CLI transport, recovery policy, application tooling, and production Registry integration require future design and implementation. See [2-of-3 multisig key recovery research](research/2-of-3-multisig-key-recovery.md).
+**Limitations:** Two lost or compromised signers cannot be recovered through ordinary 2-of-3 authorization. Separate recovery policy, FROST, deployment, availability, privacy, and application tooling remain future work. See [2-of-3 multisig key recovery research](research/2-of-3-multisig-key-recovery.md).
 
 ## 7. Build a cross-domain application
 
@@ -257,5 +257,5 @@ Private keys must never be displayed, logged, transmitted as Registry content, o
 
 ## Verification
 
-The documentation-only changes were verified with `.venv/bin/pytest -q`: 56 passed, 1 skipped. The gated downloadable-object acceptance test (`tests/test_acceptance_object_url.py`, run with `DECENT_REGISTRY_RUN_ACCEPTANCE=1`) provides supporting evidence for the code-backed provider put/get mechanics.
+The documentation-only changes were verified with `.venv/bin/pytest -q`: 115 passed, 1 skipped. The gated downloadable-object acceptance test (`tests/test_acceptance_object_url.py`, run with `DECENT_REGISTRY_RUN_ACCEPTANCE=1`) provides supporting evidence for the code-backed provider put/get mechanics.
 

@@ -84,19 +84,19 @@ Explain server and client configuration, host/port, bootstrap values, datastore 
 
 ### 10. Testing and verification
 
-Describe the test command, expected baseline, local verification of signatures and record validation, and how to check CLI examples. The recorded baseline is `.venv/bin/pytest -q`: 56 passed, 1 skipped.
+Describe the test command, expected baseline, local verification of signatures and record validation, and how to check CLI examples. The recorded baseline is `.venv/bin/pytest -q`: 115 passed, 1 skipped.
 
 **Sources:** the `README.md` Development section, `pyproject.toml`, `tests/`, and [`developer-surface-inventory.md`](developer-surface-inventory.md).
 
 ### 11. Research and proposed surfaces
 
-Clearly label each item as researched but unimplemented, proposed design, or long-term vision. Link to the developer-surface inventory research section, [`2-of-3-multisig-key-recovery.md`](../research/2-of-3-multisig-key-recovery.md), [`identity-recovery-research.md`](../research/identity-recovery-research.md), [`registry-url-format.md`](../research/registry-url-format.md), [`browser-extension-dht-url-rendering.md`](../research/browser-extension-dht-url-rendering.md), and [`companion-service-concepts.md`](companion-service-concepts.md).
+Clearly label each item with one exact canonical class: Implemented and code-backed, Documented or researched but unimplemented, Proposed design, or Long-term vision. Link to the developer-surface inventory research section, [`2-of-3-multisig-key-recovery.md`](../research/2-of-3-multisig-key-recovery.md), [`identity-recovery-research.md`](../research/identity-recovery-research.md), [`registry-url-format.md`](../research/registry-url-format.md), [`browser-extension-dht-url-rendering.md`](../research/browser-extension-dht-url-rendering.md), and [`companion-service-concepts.md`](companion-service-concepts.md). The implemented version-1 explicit-Ed25519 Bundle and finalized-record workflow must link to [`multisignature-records.md`](../multisignature-records.md).
 
-The guide must explicitly state that these are not implemented interfaces, APIs, or protocols. It must not imply current CLI or Python support for HTTP gateways, browser extensions, native-messaging bridges, identity graphs, recovery, multisignature bundles, general-purpose storage services, or social services.
+The guide must explicitly state which surfaces are not implemented interfaces, APIs, or protocols. It must not imply current CLI or Python support for HTTP gateways, browser extensions, native-messaging bridges, Identity Graphs, separate recovery policy, FROST, general-purpose storage services, or Social services. The implemented version-1 multisignature Bundle and finalized-record workflow must link to [`multisignature-records.md`](../multisignature-records.md).
 
 ### 12. Limitations and boundaries
 
-Collect operational and architectural limitations: bootstrap peer identity lifecycle, DHT/storage availability, public-record visibility, current single-key identity authorization, absence of companion-service protocols, and the distinction between research and implementation.
+Collect operational and architectural limitations: bootstrap peer identity lifecycle, DHT/storage availability, public-record visibility, legacy single-key identity compatibility, absence of separate recovery and Companion Service protocols, and the distinction between implemented version-1 multisignature behavior, research, and future design.
 
 **Sources:** the Boundaries and limitations section of [`developer-surface-inventory.md`](developer-surface-inventory.md), the canonical setup guides, and the research files.
 
@@ -158,7 +158,7 @@ This artifact resolves #77. It does not implement the final `docs/developer-guid
 
 ## Verification
 
-This planning artifact makes no code or test changes. The repository baseline remains `.venv/bin/pytest -q`: 56 passed, 1 skipped.
+This planning artifact makes no code or test changes. The repository baseline remains `.venv/bin/pytest -q`: 115 passed, 1 skipped.
 
 ## Source inputs
 

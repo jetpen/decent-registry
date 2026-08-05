@@ -4,7 +4,7 @@
 
 This document describes proposed Companion Service conventions around the implemented Registry. It defines user-facing roles, boundaries, relationships, and value. It does not define production wire protocols, schemas, endpoints, APIs, or implementations for companion services.
 
-The Registry is the only implemented service described here. Identity, Storage, and Social are proposed conventions that build on Registry records. Identity recovery and production multisignature workflows remain researched or unimplemented; pure multisignature state-transition validation is code-backed in `verification.py`.
+The Registry is the only implemented service described here. Identity, Storage, and Social are proposed conventions that build on Registry records. Separate Identity recovery remains researched or unimplemented. Version-1 explicit-Ed25519 multisignature record workflows are implemented in the Registry and documented in [Multisignature Records and Migration](multisignature-records.md).
 
 ## Claim classes
 
@@ -48,18 +48,18 @@ Registry records may contain:
 
 Private keys are never registry content. They must remain in local, secure, or hardware-backed key stores and must never be displayed, logged, transmitted as registry data, or included in documentation examples. A registry record may refer to local key-management or recovery processes, but it must not publish secret key material.
 
-The current implementation supports the basic single-key Identity Record path. Identity Graphs, alias resolution, recovery, and key rotation are not current Registry operations.
+The current implementation supports legacy single-key Identity Records and version-1 explicit-Ed25519 multisignature Identity and Provider Record workflows. Identity Graphs, alias resolution, separate recovery policy, and key rotation are not current Registry operations.
 
 ### Recovery and multisignature research
 
-**Claim class: Documented or researched but unimplemented for production workflows.**
+**Claim class: Documented or researched but unimplemented.**
 
 The following research informs possible future Identity conventions:
 
 - [`docs/research/identity-recovery-research.md`](research/identity-recovery-research.md) evaluates passkeys, guardian recovery, one-time recovery material, and other methods. It requires future validator and protocol work.
 - [`docs/research/2-of-3-multisig-key-recovery.md`](research/2-of-3-multisig-key-recovery.md) evaluates an explicit 2-of-3 Signer Set and key-replacement transitions.
 
-Pure multisignature state-transition validation is code-backed in `src/decent_registry/verification.py`, but recovery, CLI workflows, Python put/get integration, and DHT integration remain unimplemented. These research documents must not be presented as production workflow documentation.
+Separate recovery is not provided by the ordinary Signer Set rules. The implemented CLI, Python, put/get, and DHT workflow is documented in [Multisignature Records and Migration](multisignature-records.md); the linked recovery research must not be presented as a production recovery protocol.
 
 ## Storage convention — proposed
 
@@ -119,5 +119,5 @@ Private keys must never be displayed, logged, transmitted, stored as registry co
 
 ## Verification
 
-The documentation-only change is verified with `.venv/bin/pytest -q`: 56 passed, 1 skipped.
+The documentation-only change is verified with `.venv/bin/pytest -q`: 115 passed, 1 skipped.
 
