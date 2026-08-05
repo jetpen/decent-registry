@@ -30,12 +30,20 @@ class SeqStateEntry:
     seq: int
 
 
-@dataclass(frozen=True, slots=True)
+_STATE_VALIDATION_TOKEN = object()
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class MultisignatureState:
-    """Accepted state needed to validate the next multisignature update."""
+    """Accepted state returned by a validated transition.
+
+    Instances are created only by this module's validators. Callers must not
+    construct state objects from unvalidated wire data.
+    """
 
     record_key: bytes
     record_kind: int
+    owner_public_key: bytes
     signed_update_bytes: bytes
     state_hash: bytes
     epoch: int
@@ -43,32 +51,31 @@ class MultisignatureState:
     threshold: int
     signer_set: tuple[tuple[str, bytes], ...]
 
-    @classmethod
-    def from_envelope(
-        cls, *, record_key: bytes, envelope_cbor: bytes
-    ) -> "MultisignatureState":
-        (
-            signed_update_bytes,
-            _envelope,
-            _signed_update,
-            _record_fields,
-            _payload,
-            _seq,
-            _derived_record_key,
-            authorization,
-        ) = _decode_multisignature_candidate(envelope_cbor)
-        if _derived_record_key != record_key:
-            raise ValueError("lookup-key mismatch")
-        return cls(
-            record_key=bytes(record_key),
-            record_kind=authorization[2],
-            signed_update_bytes=signed_update_bytes,
-            state_hash=_sha256(signed_update_bytes),
-            epoch=authorization[4],
-            seq=_seq,
-            threshold=authorization[5],
-            signer_set=_signer_tuple(authorization),
-        )
+    def __init__(
+        self,
+        *,
+        record_key: bytes,
+        record_kind: int,
+        owner_public_key: bytes,
+        signed_update_bytes: bytes,
+        state_hash: bytes,
+        epoch: int,
+        seq: int,
+        threshold: int,
+        signer_set: tuple[tuple[str, bytes], ...],
+        _validation_token: object,
+    ) -> None:
+        if _validation_token is not _STATE_VALIDATION_TOKEN:
+            raise TypeError("MultisignatureState must come from a validator")
+        object.__setattr__(self, "record_key", bytes(record_key))
+        object.__setattr__(self, "record_kind", record_kind)
+        object.__setattr__(self, "owner_public_key", bytes(owner_public_key))
+        object.__setattr__(self, "signed_update_bytes", bytes(signed_update_bytes))
+        object.__setattr__(self, "state_hash", bytes(state_hash))
+        object.__setattr__(self, "epoch", epoch)
+        object.__setattr__(self, "seq", seq)
+        object.__setattr__(self, "threshold", threshold)
+        object.__setattr__(self, "signer_set", tuple(signer_set))
 
 
 # Cache the concrete Ed25519 public key class (the one libp2p returns).
@@ -410,21 +417,40 @@ def _candidate_state(
         dict[int, Any],
     ],
 ) -> MultisignatureState:
+    record_kind = parsed[7][2]
+    owner_public_key = (
+        parsed[3][2] if record_kind == RECORD_KIND_IDENTITY else parsed[3][1]
+    )
     return MultisignatureState(
         record_key=bytes(record_key),
-        record_kind=parsed[7][2],
+        record_kind=record_kind,
+        owner_public_key=bytes(owner_public_key),
         signed_update_bytes=parsed[0],
         state_hash=_sha256(parsed[0]),
         epoch=parsed[7][4],
         seq=parsed[5],
         threshold=parsed[7][5],
         signer_set=_signer_tuple(parsed[7]),
+        _validation_token=_STATE_VALIDATION_TOKEN,
     )
 
 
 def _require_complete_2_of_3(authorization: dict[int, Any]) -> None:
     if authorization[5] != 2 or len(authorization[6]) != 3:
         raise ValueError("complete 2-of-3 Signer Set required")
+
+
+def _signer_id_for_public_key(
+    authorization: dict[int, Any], public_key: bytes
+) -> str:
+    matches = [
+        entry[1]
+        for entry in authorization[6]
+        if bytes(entry[2]) == public_key
+    ]
+    if len(matches) != 1:
+        raise ValueError("legacy owner must be present in next Signer Set")
+    return matches[0]
 
 
 def _validate_threshold_proofs(
@@ -482,6 +508,13 @@ def _validate_common_transition(
     authorization = parsed[7]
     if authorization[2] != current_state.record_kind:
         raise ValueError("wrong record kind")
+    candidate_owner_public_key = (
+        parsed[3][2]
+        if current_state.record_kind == RECORD_KIND_IDENTITY
+        else parsed[3][1]
+    )
+    if bytes(candidate_owner_public_key) != current_state.owner_public_key:
+        raise ValueError("owner binding mismatch")
     if parsed[5] <= current_state.seq:
         raise ValueError("seq must be strictly increasing")
     if authorization[7] != current_state.state_hash:
@@ -648,6 +681,11 @@ def validate_multisignature_upgrade(
     if len(parsed[1].proofs) != 1:
         raise ValueError("upgrade requires one legacy owner proof")
     legacy_proof = parsed[1].proofs[0]
+    expected_signer_id = _signer_id_for_public_key(
+        authorization, legacy_owner_public_key
+    )
+    if legacy_proof[1] != expected_signer_id:
+        raise ValueError("legacy owner proof signer_id mismatch")
     try:
         valid = verify_ed25519_signature(
             owner_public_key=legacy_owner_public_key,

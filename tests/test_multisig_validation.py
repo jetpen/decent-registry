@@ -22,6 +22,7 @@ from decent_registry.signed_envelope import (
     encode_signed_envelope,
 )
 from decent_registry.verification import (
+    MultisignatureState,
     make_signed_update_signature,
     validate_multisignature_update,
 )
@@ -317,6 +318,35 @@ def test_ordinary_update_rejects_retired_signer_and_changed_signer_set():
         )
 
 
+def test_ordinary_update_preserves_owner_binding():
+    keypairs = _keypairs()
+    record_key, genesis_envelope, signer_set = _identity_genesis(keypairs)
+    genesis_state = validate_multisignature_update(
+        record_key=record_key,
+        envelope_cbor=genesis_envelope,
+    )
+    update = _identity_update(
+        owner_public_key=keypairs[3].public_key.to_bytes(),
+        seq=2,
+        authorization=_authorization(
+            record_kind=RECORD_KIND_IDENTITY,
+            operation=OPERATION_ORDINARY_UPDATE,
+            epoch=1,
+            predecessor_state_hash=genesis_state.state_hash,
+            signer_set=signer_set,
+        ),
+    )
+    with pytest.raises(ValueError, match="owner binding"):
+        validate_multisignature_update(
+            record_key=record_key,
+            envelope_cbor=_envelope(
+                update,
+                [_proof("a", keypairs[0], update), _proof("b", keypairs[1], update)],
+            ),
+            current_state=genesis_state,
+        )
+
+
 def test_signer_replacement_requires_current_quorum_and_installs_complete_next_set():
     keypairs = _keypairs()
     record_key, genesis_envelope, signer_set = _identity_genesis(keypairs)
@@ -390,7 +420,7 @@ def test_legacy_owner_can_explicitly_upgrade_to_complete_2_of_3_set():
         signature=legacy_signature,
     )
 
-    signer_set = _signer_set(keypairs[1:4])
+    signer_set = _signer_set(keypairs[:3])
     upgrade = _identity_update(
         owner_public_key=legacy_public,
         seq=5,
@@ -402,9 +432,19 @@ def test_legacy_owner_can_explicitly_upgrade_to_complete_2_of_3_set():
             signer_set=signer_set,
         ),
     )
+    valid_proof = _proof("a", keypairs[0], upgrade)
+    with pytest.raises(ValueError, match="signer_id"):
+        validate_multisignature_update(
+            record_key=record_key,
+            envelope_cbor=_envelope(
+                upgrade, [{1: "wrong-owner", 2: valid_proof[2]}]
+            ),
+            legacy_envelope_cbor=legacy_envelope,
+        )
+
     state = validate_multisignature_update(
         record_key=record_key,
-        envelope_cbor=_envelope(upgrade, [_proof("legacy-owner", keypairs[0], upgrade)]),
+        envelope_cbor=_envelope(upgrade, [valid_proof]),
         legacy_envelope_cbor=legacy_envelope,
     )
     assert state.epoch == 1
@@ -510,6 +550,22 @@ def test_insufficient_quorum_is_rejected():
             record_key=record_key,
             envelope_cbor=_envelope(update, [_proof("a", keypairs[0], update)]),
             current_state=genesis_state,
+        )
+
+
+def test_state_objects_require_validator_provenance():
+    with pytest.raises(TypeError):
+        MultisignatureState(
+            record_key=b"r" * 32,
+            record_kind=RECORD_KIND_IDENTITY,
+            owner_public_key=b"o" * 32,
+            signed_update_bytes=b"u",
+            state_hash=b"h" * 32,
+            epoch=1,
+            seq=1,
+            threshold=2,
+            signer_set=(),
+            _validation_token=object(),
         )
 
 

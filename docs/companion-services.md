@@ -4,7 +4,7 @@
 
 This document describes proposed Companion Service conventions around the implemented Registry. It defines user-facing roles, boundaries, relationships, and value. It does not define production wire protocols, schemas, endpoints, APIs, or implementations for companion services.
 
-The Registry is the only implemented service described here. Identity, Storage, and Social are proposed conventions that build on Registry records. Identity recovery and multisignature authorization are researched but unimplemented.
+The Registry is the only implemented service described here. Identity, Storage, and Social are proposed conventions that build on Registry records. Identity recovery and production multisignature workflows remain researched or unimplemented; pure multisignature state-transition validation is code-backed in `verification.py`.
 
 ## Claim classes
 
@@ -52,14 +52,14 @@ The current implementation supports the basic single-key Identity Record path. I
 
 ### Recovery and multisignature research
 
-**Claim class: Documented or researched but unimplemented.**
+**Claim class: Documented or researched but unimplemented for production workflows.**
 
 The following research informs possible future Identity conventions:
 
 - [`docs/research/identity-recovery-research.md`](research/identity-recovery-research.md) evaluates passkeys, guardian recovery, one-time recovery material, and other methods. It requires future validator and protocol work.
 - [`docs/research/2-of-3-multisig-key-recovery.md`](research/2-of-3-multisig-key-recovery.md) evaluates an explicit 2-of-3 Signer Set and key-replacement transitions.
 
-Neither recovery nor multisignature support exists in the current CLI, Python API, or validator. These research documents must not be presented as implementation documentation.
+Pure multisignature state-transition validation is code-backed in `src/decent_registry/verification.py`, but recovery, CLI workflows, Python put/get integration, and DHT integration remain unimplemented. These research documents must not be presented as production workflow documentation.
 
 ## Storage convention — proposed
 
