@@ -250,7 +250,8 @@ transition must bind its authorization predecessor field to that hash.
 
 All proof signatures must be distinct, valid Ed25519 signatures from the
 required current signer set. This module provides pure transition validation;
-put/get and durable accepted-state integration remain follow-up work.
+`RecordValidator`, `RegistryService`, and `Libp2pKadDHT` apply that validation to
+multisignature `put`/`get` operations and durable accepted-state installation.
 
 ### 6.3) Local Multisignature Bundle workflow
 

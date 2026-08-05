@@ -52,7 +52,7 @@ The current implementation supports legacy single-key Identity Records and versi
 
 ### Recovery and multisignature research
 
-**Claim class: Documented or researched but unimplemented for production workflows.**
+**Claim class: Documented or researched but unimplemented.**
 
 The following research informs possible future Identity conventions:
 

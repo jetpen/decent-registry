@@ -136,7 +136,7 @@ Current implementation details are linked to the canonical protocol, setup, conf
 
 ## 6. Perform 2-of-3 multisignature Identity Record signing and updating
 
-**Claim Class:** Documented or researched but unimplemented.
+**Claim Class:** Implemented and code-backed.
 
 **Actors:** Three key holders (K1, K2, and K3), an initiating owner or application, and the Registry.
 

@@ -81,7 +81,7 @@ Each scenario uses these fields:
 
 ### 6. Perform 2-of-3 multisignature Identity Record signing and updating
 
-- **Status class:** Implemented and code-backed for the version-1 explicit-Ed25519 workflow; separate recovery policy remains documented or researched but unimplemented.
+- **Status class:** Implemented and code-backed.
 - **Actors:** Three key holders (K1, K2, K3), an initiating owner or application, and the Registry.
 - **Motivation:** Require collective authorization and permit replacement of one lost or compromised signer while two trustworthy signers remain.
 - **Flow:**

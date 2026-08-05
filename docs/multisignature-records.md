@@ -17,12 +17,20 @@ The following behavior is **implemented and code-backed**:
 - legacy single-key compatibility before upgrade and rejection of legacy writes after upgrade;
 - signer replacement, ordinary updates, strict `Seq` ordering, predecessor-state binding, and lookup-key binding.
 
-The following remain **documented or researched but unimplemented**, **proposed design**, or **long-term vision** rather than current Registry behavior:
+The following claim classes are not current Registry behavior:
 
-- recovery policies separate from ordinary threshold authorization;
-- FROST, DKG, resharing, or threshold-signature aggregation;
-- deployment, availability, privacy, governance, or application-service guarantees;
+**Claim Class: Documented or researched but unimplemented.**
+
+- Recovery policies separate from ordinary threshold authorization.
+- FROST, DKG, resharing, and threshold-signature aggregation.
+
+**Claim Class: Proposed design.**
+
 - HTTP gateways, browser integrations, Identity Graphs, and Companion Service protocols.
+
+**Claim Class: Long-term vision.**
+
+- Deployment-level availability, privacy, governance, and application-service guarantees are Ecosystem Goals, not current Registry guarantees.
 
 This document does not change the legacy wire format. It documents the interfaces already present in the repository.
 
@@ -155,17 +163,65 @@ The workflow is:
 
 `bundle sign` accepts only an unsigned bundle. To add another proof, sign the original unsigned bundle again and merge the detached proof into the accumulated bundle. Do not sign an already-signed bundle.
 
-### 4.1 Identity Record: genesis
+### 4.0 Local bundle example setup
 
-Set the values from the key-management system used by the operators. `OWNER_PUBLIC_KEY_HEX` is the Owner Public Key in the Identity Record. Each `SIGNER_ID=PUBLIC_KEY_HEX` entry is a Signer Set member.
+The following setup creates real local inputs for the Bundle examples. It uses the installed `keygen` command for private keys and prints only the corresponding public keys. Private-key bytes are never printed or placed in the Bundle.
 
 ```bash
-OWNER_NAME_HEX='<OWNER_NAME_HEX>'
-OWNER_PUBLIC_KEY_HEX='<OWNER_PUBLIC_KEY_HEX>'
-ALICE_PUBLIC_KEY_HEX='<ALICE_PUBLIC_KEY_HEX>'
-BOB_PUBLIC_KEY_HEX='<BOB_PUBLIC_KEY_HEX>'
-CAROL_PUBLIC_KEY_HEX='<CAROL_PUBLIC_KEY_HEX>'
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/decent-registry-multisig-example.XXXXXX")"
+cd "$WORKDIR"
 
+export OWNER_NAME_HEX="$(python3 -c 'print(b"cli-bundle-owner".hex())')"
+export OBJECT_HASH="$(printf '%s' 'cli-provider-object' | sha256sum | cut -d' ' -f1)"
+export PROVIDER_URL='https://example.com/artifact.bin'
+
+for signer in alice bob carol dave; do
+  decent-registry keygen --output "$WORKDIR/$signer.pem"
+done
+
+public_key_hex() {
+  python3 - "$1" <<'PY'
+import sys
+from cryptography.hazmat.primitives.serialization import (
+    Encoding,
+    PublicFormat,
+    load_pem_private_key,
+)
+
+with open(sys.argv[1], 'rb') as key_file:
+    private_key = load_pem_private_key(key_file.read(), password=None)
+print(private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex())
+PY
+}
+
+export ALICE_PUBLIC_KEY_HEX="$(public_key_hex "$WORKDIR/alice.pem")"
+export BOB_PUBLIC_KEY_HEX="$(public_key_hex "$WORKDIR/bob.pem")"
+export CAROL_PUBLIC_KEY_HEX="$(public_key_hex "$WORKDIR/carol.pem")"
+export DAVE_PUBLIC_KEY_HEX="$(public_key_hex "$WORKDIR/dave.pem")"
+export OWNER_PUBLIC_KEY_HEX="$ALICE_PUBLIC_KEY_HEX"
+
+signed_update_state_hash_hex() {
+  python3 - "$1" <<'PY'
+import cbor2
+import hashlib
+import sys
+
+with open(sys.argv[1], 'rb') as envelope_file:
+    envelope = cbor2.load(envelope_file)
+if set(envelope) != {1, 2, 3} or not isinstance(envelope[2], bytes):
+    raise SystemExit('expected a version-1 SignedEnvelope')
+print(hashlib.sha256(envelope[2]).hexdigest())
+PY
+}
+```
+
+The `example.com` Provider URL is only used to construct and sign a Provider Record; replace it with the actual object URL before publication. The draft, sign, merge, finalize, incomplete-bundle, and replacement commands below are runnable after this setup. Network `put`/`get` commands additionally require a running Registry node and the `SEED_BOOTSTRAP` and `CLIENT_PORT` variables described in section 5.
+
+### 4.1 Identity Record: genesis
+
+Each `SIGNER_ID=PUBLIC_KEY_HEX` entry is a Signer Set member. The setup above uses Alice's public key as the Identity Record's Owner Public Key.
+
+```bash
 # Create the unsigned canonical bundle.
 decent-registry bundle draft identity \
   --owner-name "$OWNER_NAME_HEX" \
@@ -182,12 +238,12 @@ decent-registry bundle draft identity \
 # Each signer uses a separate local private-key file.
 decent-registry bundle sign \
   --input identity-genesis.draft.cbor \
-  --signer-privkey /secure/local/alice.pem \
+  --signer-privkey "$WORKDIR/alice.pem" \
   --output identity-alice.proof.cbor
 
 decent-registry bundle sign \
   --input identity-genesis.draft.cbor \
-  --signer-privkey /secure/local/bob.pem \
+  --signer-privkey "$WORKDIR/bob.pem" \
   --output identity-bob.proof.cbor
 
 # Merge detached proofs into a new local bundle.
@@ -208,13 +264,7 @@ The private-key paths above are local inputs only. They are not embedded in the 
 ### 4.2 Provider Record: genesis
 
 ```bash
-OBJECT_HASH='<OBJECT_HASH_64_HEX>'
-PROVIDER_URL='https://example.com/artifact.bin'
-OWNER_PUBLIC_KEY_HEX='<OWNER_PUBLIC_KEY_HEX>'
-ALICE_PUBLIC_KEY_HEX='<ALICE_PUBLIC_KEY_HEX>'
-BOB_PUBLIC_KEY_HEX='<BOB_PUBLIC_KEY_HEX>'
-CAROL_PUBLIC_KEY_HEX='<CAROL_PUBLIC_KEY_HEX>'
-
+# Values and signer public keys come from section 4.0.
 # Endpoint order in the input does not change the canonical payload; the
 # provider schema stores endpoints in lexicographic order.
 decent-registry bundle draft provider \
@@ -234,12 +284,12 @@ decent-registry bundle draft provider \
 
 decent-registry bundle sign \
   --input provider-genesis.draft.cbor \
-  --signer-privkey /secure/local/alice.pem \
+  --signer-privkey "$WORKDIR/alice.pem" \
   --output provider-alice.proof.cbor
 
 decent-registry bundle sign \
   --input provider-genesis.draft.cbor \
-  --signer-privkey /secure/local/bob.pem \
+  --signer-privkey "$WORKDIR/bob.pem" \
   --output provider-bob.proof.cbor
 
 decent-registry bundle merge \
@@ -255,15 +305,21 @@ decent-registry bundle finalize \
 
 ### 4.3 Incomplete bundles and rejection behavior
 
-Finalization of a bundle with fewer than the required distinct proofs fails and does not publish output. The following command is expected to exit non-zero for a 2-of-3 bundle containing only one proof:
+Finalization of a bundle with fewer than the required distinct proofs fails and does not publish output. The following commands are expected to exit non-zero for 2-of-3 bundles containing only one proof:
 
 ```bash
+# Identity Record: identity-alice.proof.cbor was created in section 4.1.
 decent-registry bundle finalize \
-  --input identity-with-one-proof.cbor \
-  --output should-not-be-published.cbor
+  --input identity-alice.proof.cbor \
+  --output identity-should-not-be-published.cbor
+
+# Provider Record: provider-alice.proof.cbor was created in section 4.2.
+decent-registry bundle finalize \
+  --input provider-alice.proof.cbor \
+  --output provider-should-not-be-published.cbor
 ```
 
-The CLI also rejects:
+Neither output file is written on failure. The CLI also rejects:
 
 - duplicate proof signers;
 - proofs signed by a non-member of the Signer Set;
@@ -277,8 +333,97 @@ The CLI also rejects:
 
 Migration is explicit. It does not reinterpret a legacy SignedEnvelope as multisignature state.
 
-1. Resolve or otherwise retain the canonical legacy SignedUpdate bytes for the existing record.
-2. Build an `upgrade` bundle with the same record identity and Owner Public Key, `Seq` greater than the legacy `Seq`, `epoch 1`, a complete new Signer Set, and `--predecessor-state-hash` equal to `sha256(legacy_signed_update_bytes)`.
+1. Retain the original legacy SignedEnvelope file. `get` returns decoded record JSON, not the raw legacy envelope, so the application or publisher must preserve the file when the legacy record is created. For a fresh local Identity migration test, create a legacy envelope with the repository's canonical builder:
+
+```bash
+export LEGACY_IDENTITY_ENVELOPE="$WORKDIR/legacy-identity.signed-envelope.cbor"
+python3 - "$LEGACY_IDENTITY_ENVELOPE" "$OWNER_NAME_HEX" "$WORKDIR/alice.pem" <<'PY'
+import sys
+from pathlib import Path
+from decent_registry.envelope_builder import build_identity_envelope
+
+output, owner_name_hex, private_key_path = sys.argv[1:]
+Path(output).write_bytes(
+    build_identity_envelope(
+        owner_name_hex=owner_name_hex,
+        owner_privkey_pem_path=private_key_path,
+        seq=1,
+    )
+)
+PY
+```
+
+   The legacy envelope must be submitted or already accepted for the same record key before the upgrade. Compute the predecessor hash from the canonical legacy SignedUpdate bytes inside that retained envelope:
+
+```bash
+export LEGACY_SIGNED_UPDATE_SHA256_HEX="$(python3 - "$LEGACY_IDENTITY_ENVELOPE" <<'PY'
+import cbor2
+import hashlib
+import sys
+from pathlib import Path
+
+envelope = cbor2.loads(Path(sys.argv[1]).read_bytes())
+if set(envelope) != {1, 2} or not isinstance(envelope[1], bytes):
+    raise SystemExit('expected a legacy SignedEnvelope')
+print(hashlib.sha256(envelope[1]).hexdigest())
+PY
+)"
+```
+
+   For a Provider Record migration, retain a Provider legacy envelope and compute its predecessor hash in the same way:
+
+```bash
+export LEGACY_PROVIDER_ENVELOPE="$WORKDIR/legacy-provider.signed-envelope.cbor"
+python3 - "$LEGACY_PROVIDER_ENVELOPE" "$OBJECT_HASH" "$PROVIDER_URL" "$WORKDIR/alice.pem" <<'PY'
+import sys
+from pathlib import Path
+from decent_registry.envelope_builder import build_provider_envelope
+
+output, object_hash, provider_url, private_key_path = sys.argv[1:]
+Path(output).write_bytes(
+    build_provider_envelope(
+        object_hash=object_hash,
+        provider_url=provider_url,
+        owner_privkey_pem_path=private_key_path,
+        seq=1,
+        endpoints=['/ip4/127.0.0.1/tcp/10001'],
+    )
+)
+PY
+
+export LEGACY_PROVIDER_SIGNED_UPDATE_SHA256_HEX="$(python3 - "$LEGACY_PROVIDER_ENVELOPE" <<'PY'
+import cbor2
+import hashlib
+import sys
+from pathlib import Path
+
+envelope = cbor2.loads(Path(sys.argv[1]).read_bytes())
+if set(envelope) != {1, 2} or not isinstance(envelope[1], bytes):
+    raise SystemExit('expected a legacy SignedEnvelope')
+print(hashlib.sha256(envelope[1]).hexdigest())
+PY
+)"
+```
+
+   After setting `REGISTRY_HOST`, `CLIENT_PORT`, and `SEED_BOOTSTRAP` as shown in section 5, publish these retained legacy envelopes before creating their corresponding upgrades:
+
+   ```bash
+   decent-registry put identity \
+     --host "$REGISTRY_HOST" \
+     --port "$CLIENT_PORT" \
+     --bootstrap "$SEED_BOOTSTRAP" \
+     --owner-name "$OWNER_NAME_HEX" \
+     --finalized-envelope "$LEGACY_IDENTITY_ENVELOPE"
+
+   decent-registry put provider \
+     --host "$REGISTRY_HOST" \
+     --port "$CLIENT_PORT" \
+     --bootstrap "$SEED_BOOTSTRAP" \
+     --object-hash "$OBJECT_HASH" \
+     --finalized-envelope "$LEGACY_PROVIDER_ENVELOPE"
+   ```
+
+2. Build an `upgrade` bundle with the same record identity and Owner Public Key, `Seq` greater than the legacy `Seq`, `epoch 1`, a complete new Signer Set, and `--predecessor-state-hash "$LEGACY_SIGNED_UPDATE_SHA256_HEX"`.
 3. The legacy owner signs the upgrade bundle. `bundle finalize` requires exactly that one valid legacy-owner proof.
 4. Submit the finalized envelope with `put --finalized-envelope` against the existing record key.
 
@@ -287,20 +432,20 @@ Identity upgrade draft shape:
 ```bash
 decent-registry bundle draft identity \
   --owner-name "$OWNER_NAME_HEX" \
-  --owner-public-key "$LEGACY_OWNER_PUBLIC_KEY_HEX" \
-  --seq "$UPGRADE_SEQ_GREATER_THAN_LEGACY_SEQ" \
+  --owner-public-key "$OWNER_PUBLIC_KEY_HEX" \
+  --seq 2 \
   --threshold 2 \
   --epoch 1 \
   --predecessor-state-hash "$LEGACY_SIGNED_UPDATE_SHA256_HEX" \
   --operation upgrade \
-  --signer "legacy-owner=$LEGACY_OWNER_PUBLIC_KEY_HEX" \
-  --signer "new-signer=$NEW_SIGNER_PUBLIC_KEY_HEX" \
-  --signer "third-signer=$THIRD_SIGNER_PUBLIC_KEY_HEX" \
+  --signer "legacy-owner=$OWNER_PUBLIC_KEY_HEX" \
+  --signer "new-signer=$BOB_PUBLIC_KEY_HEX" \
+  --signer "third-signer=$CAROL_PUBLIC_KEY_HEX" \
   --output identity-upgrade.draft.cbor
 
 decent-registry bundle sign \
   --input identity-upgrade.draft.cbor \
-  --signer-privkey /secure/local/legacy-owner.pem \
+  --signer-privkey "$WORKDIR/alice.pem" \
   --output identity-upgrade.owner-proof.cbor
 
 decent-registry bundle merge \
@@ -320,20 +465,20 @@ decent-registry bundle draft provider \
   --object-hash "$OBJECT_HASH" \
   --provider-url "$PROVIDER_URL" \
   --endpoint /ip4/127.0.0.1/tcp/10001 \
-  --owner-public-key "$LEGACY_OWNER_PUBLIC_KEY_HEX" \
-  --seq "$UPGRADE_SEQ_GREATER_THAN_LEGACY_SEQ" \
+  --owner-public-key "$OWNER_PUBLIC_KEY_HEX" \
+  --seq 2 \
   --threshold 2 \
   --epoch 1 \
-  --predecessor-state-hash "$LEGACY_SIGNED_UPDATE_SHA256_HEX" \
+  --predecessor-state-hash "$LEGACY_PROVIDER_SIGNED_UPDATE_SHA256_HEX" \
   --operation upgrade \
-  --signer "legacy-owner=$LEGACY_OWNER_PUBLIC_KEY_HEX" \
-  --signer "new-signer=$NEW_SIGNER_PUBLIC_KEY_HEX" \
-  --signer "third-signer=$THIRD_SIGNER_PUBLIC_KEY_HEX" \
+  --signer "legacy-owner=$OWNER_PUBLIC_KEY_HEX" \
+  --signer "new-signer=$BOB_PUBLIC_KEY_HEX" \
+  --signer "third-signer=$CAROL_PUBLIC_KEY_HEX" \
   --output provider-upgrade.draft.cbor
 
 decent-registry bundle sign \
   --input provider-upgrade.draft.cbor \
-  --signer-privkey /secure/local/legacy-owner.pem \
+  --signer-privkey "$WORKDIR/alice.pem" \
   --output provider-upgrade.owner-proof.cbor
 
 decent-registry bundle merge \
@@ -348,17 +493,112 @@ decent-registry bundle finalize \
 
 An upgrade with a wrong predecessor hash, changed Owner Binding, wrong record kind, non-owner proof, more than one proof, or a non-increasing `Seq` is rejected.
 
+### 4.5 Signer replacement
+
+Signer replacement uses the current Signer Set to authorize installation of a new Signer Set. The examples below assume the genesis envelopes from sections 4.1 and 4.2 were finalized and accepted for their record keys. Alice and Bob are proofs from the current `{alice, bob, carol}` set; the replacement set is `{alice, bob, dave}`.
+
+Identity Record replacement:
+
+```bash
+export IDENTITY_GENESIS_STATE_HASH_HEX="$(signed_update_state_hash_hex identity-genesis.signed-envelope.cbor)"
+
+decent-registry bundle draft identity \
+  --owner-name "$OWNER_NAME_HEX" \
+  --owner-public-key "$OWNER_PUBLIC_KEY_HEX" \
+  --seq 2 \
+  --threshold 2 \
+  --epoch 2 \
+  --predecessor-state-hash "$IDENTITY_GENESIS_STATE_HASH_HEX" \
+  --operation replace-signers \
+  --signer "alice=$ALICE_PUBLIC_KEY_HEX" \
+  --signer "bob=$BOB_PUBLIC_KEY_HEX" \
+  --signer "dave=$DAVE_PUBLIC_KEY_HEX" \
+  --output identity-replacement.draft.cbor
+
+# Alice and Bob are current-set signers authorizing the new set.
+decent-registry bundle sign \
+  --input identity-replacement.draft.cbor \
+  --signer-privkey "$WORKDIR/alice.pem" \
+  --output identity-replacement.alice.proof.cbor
+
+decent-registry bundle sign \
+  --input identity-replacement.draft.cbor \
+  --signer-privkey "$WORKDIR/bob.pem" \
+  --output identity-replacement.bob.proof.cbor
+
+decent-registry bundle merge \
+  --input identity-replacement.draft.cbor \
+  --proof identity-replacement.alice.proof.cbor \
+  --proof identity-replacement.bob.proof.cbor \
+  --output identity-replacement.complete.cbor
+
+decent-registry bundle finalize \
+  --input identity-replacement.complete.cbor \
+  --output identity-replacement.signed-envelope.cbor
+```
+
+Provider Record replacement:
+
+```bash
+export PROVIDER_GENESIS_STATE_HASH_HEX="$(signed_update_state_hash_hex provider-genesis.signed-envelope.cbor)"
+
+decent-registry bundle draft provider \
+  --object-hash "$OBJECT_HASH" \
+  --provider-url "$PROVIDER_URL" \
+  --endpoint /ip4/127.0.0.1/tcp/10001 \
+  --owner-public-key "$OWNER_PUBLIC_KEY_HEX" \
+  --seq 2 \
+  --threshold 2 \
+  --epoch 2 \
+  --predecessor-state-hash "$PROVIDER_GENESIS_STATE_HASH_HEX" \
+  --operation replace-signers \
+  --signer "alice=$ALICE_PUBLIC_KEY_HEX" \
+  --signer "bob=$BOB_PUBLIC_KEY_HEX" \
+  --signer "dave=$DAVE_PUBLIC_KEY_HEX" \
+  --output provider-replacement.draft.cbor
+
+decent-registry bundle sign \
+  --input provider-replacement.draft.cbor \
+  --signer-privkey "$WORKDIR/alice.pem" \
+  --output provider-replacement.alice.proof.cbor
+
+decent-registry bundle sign \
+  --input provider-replacement.draft.cbor \
+  --signer-privkey "$WORKDIR/bob.pem" \
+  --output provider-replacement.bob.proof.cbor
+
+decent-registry bundle merge \
+  --input provider-replacement.draft.cbor \
+  --proof provider-replacement.alice.proof.cbor \
+  --proof provider-replacement.bob.proof.cbor \
+  --output provider-replacement.complete.cbor
+
+decent-registry bundle finalize \
+  --input provider-replacement.complete.cbor \
+  --output provider-replacement.signed-envelope.cbor
+```
+
+Submit and resolve both replacement envelopes using the finalized `put`/`get` commands in section 5, replacing the genesis filenames with `identity-replacement.signed-envelope.cbor` and `provider-replacement.signed-envelope.cbor`. The Registry rejects a replacement signed only by Dave or by any signer outside the current set, even though Dave belongs to the new set.
+
 ## 5. Registry submission and resolution
 
-The finalized envelope is the only bundle artifact accepted by `put`.
+The finalized envelope is the only bundle artifact accepted by `put`. Start a Registry node using the operator setup documentation, copy its emitted `[BOOTSTRAP]` multiaddr, and set the deployment variables before running these commands:
+
+```bash
+export REGISTRY_HOST='127.0.0.1'
+export CLIENT_PORT='9101'
+export SEED_BOOTSTRAP='/ip4/127.0.0.1/tcp/9000/p2p/REPLACE_WITH_EMITTED_PEER_ID'
+```
+
+Replace only the `REPLACE_WITH_EMITTED_PEER_ID` component with the peer ID printed by the node. The remaining commands contain no shell-redirection placeholders. The same variables apply to the replacement and upgrade `put` commands described in sections 4.4 and 4.5.
 
 ### 5.1 Finalized Identity Record submission
 
 ```bash
 decent-registry put identity \
-  --host 127.0.0.1 \
-  --port <CLIENT_PORT> \
-  --bootstrap <SEED_LISTEN_MULTIADDR>/p2p/<SEED_PEER_ID> \
+  --host "$REGISTRY_HOST" \
+  --port "$CLIENT_PORT" \
+  --bootstrap "$SEED_BOOTSTRAP" \
   --owner-name "$OWNER_NAME_HEX" \
   --finalized-envelope identity-genesis.signed-envelope.cbor
 ```
@@ -369,9 +609,9 @@ Resolve it with:
 
 ```bash
 decent-registry get identity \
-  --host 127.0.0.1 \
-  --port <CLIENT_PORT> \
-  --bootstrap <SEED_LISTEN_MULTIADDR>/p2p/<SEED_PEER_ID> \
+  --host "$REGISTRY_HOST" \
+  --port "$CLIENT_PORT" \
+  --bootstrap "$SEED_BOOTSTRAP" \
   --owner-name "$OWNER_NAME_HEX"
 ```
 
@@ -381,9 +621,9 @@ A multisignature Identity Record includes `object_key`, `owner_name`, `owner_pub
 
 ```bash
 decent-registry put provider \
-  --host 127.0.0.1 \
-  --port <CLIENT_PORT> \
-  --bootstrap <SEED_LISTEN_MULTIADDR>/p2p/<SEED_PEER_ID> \
+  --host "$REGISTRY_HOST" \
+  --port "$CLIENT_PORT" \
+  --bootstrap "$SEED_BOOTSTRAP" \
   --object-hash "$OBJECT_HASH" \
   --finalized-envelope provider-genesis.signed-envelope.cbor
 ```
@@ -394,9 +634,9 @@ Resolve it with:
 
 ```bash
 decent-registry get provider \
-  --host 127.0.0.1 \
-  --port <CLIENT_PORT> \
-  --bootstrap <SEED_LISTEN_MULTIADDR>/p2p/<SEED_PEER_ID> \
+  --host "$REGISTRY_HOST" \
+  --port "$CLIENT_PORT" \
+  --bootstrap "$SEED_BOOTSTRAP" \
   --object-hash "$OBJECT_HASH"
 ```
 
