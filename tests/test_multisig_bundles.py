@@ -46,6 +46,19 @@ def _draft_identity(keypairs: list[Any]) -> MultisignatureBundle:
     )
 
 
+def _draft_provider(
+    keypairs: list[Any], *, seq: int = 1
+) -> MultisignatureBundle:
+    return draft_provider_bundle(
+        object_hash=OBJECT_HASH,
+        provider_url=PROVIDER_URL,
+        endpoints=["/ip4/127.0.0.1/tcp/9000"],
+        owner_public_key=keypairs[0].public_key.to_bytes(),
+        seq=seq,
+        signer_set=_signer_set(keypairs[:3]),
+    )
+
+
 def test_identity_draft_is_canonical_and_has_no_proofs_or_private_key_material():
     keypairs = _keypairs()
     bundle = _draft_identity(keypairs)
@@ -70,14 +83,7 @@ def test_bundle_objects_are_immutable():
 
 def test_provider_draft_contains_the_complete_provider_payload():
     keypairs = _keypairs()
-    bundle = draft_provider_bundle(
-        object_hash=OBJECT_HASH,
-        provider_url=PROVIDER_URL,
-        endpoints=["/ip4/127.0.0.1/tcp/9000"],
-        owner_public_key=keypairs[0].public_key.to_bytes(),
-        seq=1,
-        signer_set=_signer_set(keypairs[:3]),
-    )
+    bundle = _draft_provider(keypairs)
 
     assert bundle.record_kind == 2
     assert bundle.signed_update[2] == build_provider_payload_dict(
@@ -91,14 +97,7 @@ def test_provider_draft_contains_the_complete_provider_payload():
 
 def test_provider_bundle_supports_sign_merge_finalize_and_round_trip():
     keypairs = _keypairs()
-    bundle = draft_provider_bundle(
-        object_hash=OBJECT_HASH,
-        provider_url=PROVIDER_URL,
-        endpoints=["/ip4/127.0.0.1/tcp/9000"],
-        owner_public_key=keypairs[0].public_key.to_bytes(),
-        seq=1,
-        signer_set=_signer_set(keypairs[:3]),
-    )
+    bundle = _draft_provider(keypairs)
 
     complete = merge_proof(
         merge_proof(bundle, sign_bundle(bundle, keypairs[0].private_key)),
