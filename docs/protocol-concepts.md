@@ -233,6 +233,25 @@ Legacy `decode_signed_envelope` continues to decode only `{1,2}`. The
 multisignature decoder requires `{1,2,3}` and version `1`, so an old client
 cannot treat one multisignature proof as a legacy signature.
 
+### 6.2) Multisignature state-transition validation
+
+The accepted-state hash is `sha256(canonical SignedUpdate bytes)`. A candidate
+transition must bind its authorization predecessor field to that hash.
+
+- `genesis` requires a zero predecessor, `epoch = 1`, and a complete 2-of-3 set.
+- `ordinary update` requires the current epoch and unchanged signer set and
+  threshold, with a strictly higher `seq`.
+- `replace signers` requires a complete new 2-of-3 set, a higher epoch and
+  `seq`, and proofs from the current set; the new set cannot authorize its own
+  installation.
+- `upgrade` requires the current legacy owner signature, the same lookup key
+  and owner binding, a strictly higher `seq`, `epoch = 1`, and a complete 2-of-3
+  set.
+
+All proof signatures must be distinct, valid Ed25519 signatures from the
+required current signer set. This module provides pure transition validation;
+put/get and durable accepted-state integration remain follow-up work.
+
 ---
 
 ## 7) Overwrite rules: seq monotonicity + owner binding
