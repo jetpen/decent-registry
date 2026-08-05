@@ -1,8 +1,10 @@
+import hashlib
 import sys
 import time
 from dataclasses import dataclass
 from typing import Any
 
+import cbor2
 import trio
 from multiaddr import Multiaddr
 from libp2p import new_host
@@ -14,7 +16,86 @@ from libp2p.tools.anyio_service.context import background_trio_service
 
 from decent_registry.storage_backend import StorageBackend
 from decent_registry.provider_schema import ProviderPayloadV1
-from decent_registry.record_validator import RecordValidator
+from decent_registry.record_validator import (
+    IdentityRecordResult,
+    ProviderOverwriteResult,
+    ProviderRecordResult,
+    RecordValidator,
+)
+from decent_registry.signed_envelope import decode_signed_envelope
+
+
+def _envelope_signed_update_bytes(envelope_cbor: bytes) -> bytes:
+    decoded = cbor2.loads(envelope_cbor)
+    if not isinstance(decoded, dict):
+        raise ValueError("accepted envelope must be a CBOR map")
+    if set(decoded) == {1, 2}:
+        signed_update_bytes = decoded[1]
+    elif set(decoded) == {1, 2, 3}:
+        signed_update_bytes = decoded[2]
+    else:
+        raise ValueError("accepted envelope has an unsupported shape")
+    if not isinstance(signed_update_bytes, (bytes, bytearray)):
+        raise ValueError("accepted envelope SignedUpdate must be bytes")
+    return bytes(signed_update_bytes)
+
+
+def _envelope_seq(envelope_cbor: bytes) -> int:
+    signed_update_bytes = _envelope_signed_update_bytes(envelope_cbor)
+    signed_update = cbor2.loads(signed_update_bytes)
+    seq = signed_update[3]
+    if isinstance(seq, bool) or not isinstance(seq, int) or seq < 0:
+        raise ValueError("accepted envelope seq must be a non-negative integer")
+    return seq
+
+
+def _is_multisignature_envelope(envelope_cbor: bytes | None) -> bool:
+    if envelope_cbor is None:
+        return False
+    try:
+        decoded = cbor2.loads(envelope_cbor)
+    except Exception:
+        return False
+    return isinstance(decoded, dict) and set(decoded) == {1, 2, 3}
+
+
+def _select_newest_envelope(
+    first: bytes | None, second: bytes | None
+) -> bytes | None:
+    if first is None:
+        return second
+    if second is None:
+        return first
+    if first == second:
+        return first
+    try:
+        first_seq = _envelope_seq(first)
+        second_seq = _envelope_seq(second)
+    except Exception:
+        # Prefer a structurally parseable value when one source is stale or
+        # corrupt; the RecordValidator still performs full validation later.
+        try:
+            _envelope_seq(first)
+        except Exception:
+            return second
+        try:
+            _envelope_seq(second)
+        except Exception:
+            return first
+        raise ValueError("conflicting accepted envelopes")
+    if first_seq == second_seq:
+        raise ValueError("conflicting accepted envelopes at equal seq")
+    return first if first_seq > second_seq else second
+
+
+def _result_seq_and_state_hash(result: Any, envelope_cbor: bytes) -> tuple[int, bytes]:
+    seq_value = getattr(result, "seq", None)
+    seq = _envelope_seq(envelope_cbor) if seq_value is None else int(seq_value)
+    authorization = getattr(result, "authorization", None)
+    if authorization is not None:
+        return seq, bytes(authorization.state_hash)
+    signed_update_bytes = _envelope_signed_update_bytes(envelope_cbor)
+    return seq, hashlib.sha256(signed_update_bytes).digest()
 
 
 class Libp2pKadDHT:
@@ -39,6 +120,7 @@ class Libp2pKadDHT:
         self._host = new_host(key_pair=self._key_pair, enable_tcp=True)
         self._durable_store = durable_store
         self._validator = RecordValidator()
+        self._accepted_lock = trio.Lock()
 
         self._host_ctx: Any | None = None
         self._dht_ctx: Any | None = None
@@ -128,137 +210,186 @@ class Libp2pKadDHT:
 
     def _kad_key(self, object_hash: str, *, kind: str = "provider") -> str:
         return f"/decent-registry/{kind}/{object_hash}"
+    def _durable_get(
+        self, *, kind: str, key: bytes
+    ) -> bytes | None:
+        if self._durable_store is None:
+            return None
+        return self._durable_store.get(kind=kind, key=key)  # type: ignore[arg-type]
+
+    def _durable_install(
+        self, *, kind: str, key: bytes, value: bytes, result: Any
+    ) -> None:
+        if self._durable_store is None:
+            return
+        seq, state_hash = _result_seq_and_state_hash(result, value)
+        put_if_newer = getattr(self._durable_store, "put_if_newer", None)
+        if put_if_newer is None:
+            self._durable_store.put(kind=kind, key=key, value=value)  # type: ignore[arg-type]
+            return
+        if not put_if_newer(
+            kind=kind,
+            key=key,
+            value=value,
+            seq=seq,
+            state_hash=state_hash,
+        ):
+            raise ValueError("stale or conflicting accepted state")
+
+    def _durable_cache(
+        self, *, kind: str, key: bytes, value: bytes, result: Any
+    ) -> None:
+        if self._durable_store is None:
+            return
+        seq, state_hash = _result_seq_and_state_hash(result, value)
+        put_if_newer = getattr(self._durable_store, "put_if_newer", None)
+        if put_if_newer is None:
+            self._durable_store.put(kind=kind, key=key, value=value)  # type: ignore[arg-type]
+            return
+        put_if_newer(
+            kind=kind,
+            key=key,
+            value=value,
+            seq=seq,
+            state_hash=state_hash,
+        )
+
+    async def _read_dht_value(self, kad_key: str, *, quorum: int = 0) -> bytes | None:
+        try:
+            return await self.dht.get_value(kad_key, quorum=quorum)
+        except Exception:
+            return None
+
     async def put_signed_provider_record(
         self, object_hash: str, envelope_cbor: bytes
     ) -> None:
-        """Store a CBOR signed provider update, enforcing seq monotonic overwrite."""
-
+        """Validate and install a provider envelope with legacy compatibility."""
         record_key = bytes.fromhex(object_hash)
         kad_key = self._kad_key(object_hash)
-
-        raw_existing = await self.dht.get_value(kad_key, quorum=0)
-
-        # Validation: pure, no network I/O.
-        self._validator.validate_provider_overwrite(
-            record_key=record_key,
-            envelope_cbor=envelope_cbor,
-            existing_envelope_cbor=raw_existing,
-        )
-
-        await self.dht.put_value(kad_key, envelope_cbor)
-
-        if self._durable_store is not None:
-            self._durable_store.put(
-                kind="provider", key=record_key, value=envelope_cbor
+        async with self._accepted_lock:
+            raw_dht = await self._read_dht_value(kad_key)
+            raw_local = self._durable_get(kind="provider", key=record_key)
+            use_accepted_state = (
+                _is_multisignature_envelope(envelope_cbor)
+                or _is_multisignature_envelope(raw_dht)
+                or _is_multisignature_envelope(raw_local)
             )
+            if not use_accepted_state:
+                result = self._validator.validate_provider_overwrite(
+                    record_key=record_key,
+                    envelope_cbor=envelope_cbor,
+                    existing_envelope_cbor=raw_dht,
+                )
+                await self.dht.put_value(kad_key, envelope_cbor)
+                if self._durable_store is not None:
+                    self._durable_store.put(
+                        kind="provider", key=record_key, value=envelope_cbor
+                    )
+                return
+
+            raw_existing = _select_newest_envelope(raw_dht, raw_local)
+            result = self._validator.validate_provider_overwrite(
+                record_key=record_key,
+                envelope_cbor=envelope_cbor,
+                existing_envelope_cbor=raw_existing,
+            )
+            if _is_multisignature_envelope(envelope_cbor):
+                self._durable_install(
+                    kind="provider", key=record_key, value=envelope_cbor, result=result
+                )
+            await self.dht.put_value(kad_key, envelope_cbor)
 
     async def put_signed_identity_record(
         self, object_key_hex: str, envelope_cbor: bytes
     ) -> None:
-        """Store a CBOR signed identity update under the identity namespace."""
-
+        """Validate and install an identity envelope with legacy compatibility."""
         record_key = bytes.fromhex(object_key_hex)
         kad_key = self._kad_key(object_key_hex, kind="identity")
-
-        raw_existing = await self.dht.get_value(kad_key, quorum=0)
-
-        # Validation: pure, no network I/O.
-        self._validator.validate_identity_overwrite(
-            record_key=record_key,
-            envelope_cbor=envelope_cbor,
-            existing_envelope_cbor=raw_existing,
-        )
-
-        await self.dht.put_value(kad_key, envelope_cbor)
-
-        if self._durable_store is not None:
-            self._durable_store.put(
-                kind="identity", key=record_key, value=envelope_cbor
+        async with self._accepted_lock:
+            raw_dht = await self._read_dht_value(kad_key)
+            raw_local = self._durable_get(kind="identity", key=record_key)
+            use_accepted_state = (
+                _is_multisignature_envelope(envelope_cbor)
+                or _is_multisignature_envelope(raw_dht)
+                or _is_multisignature_envelope(raw_local)
             )
+            if not use_accepted_state:
+                result = self._validator.validate_identity_overwrite(
+                    record_key=record_key,
+                    envelope_cbor=envelope_cbor,
+                    existing_envelope_cbor=raw_dht,
+                )
+                await self.dht.put_value(kad_key, envelope_cbor)
+                if self._durable_store is not None:
+                    self._durable_store.put(
+                        kind="identity", key=record_key, value=envelope_cbor
+                    )
+                return
+
+            raw_existing = _select_newest_envelope(raw_dht, raw_local)
+            result = self._validator.validate_identity_overwrite(
+                record_key=record_key,
+                envelope_cbor=envelope_cbor,
+                existing_envelope_cbor=raw_existing,
+            )
+            if _is_multisignature_envelope(envelope_cbor):
+                self._durable_install(
+                    kind="identity", key=record_key, value=envelope_cbor, result=result
+                )
+            await self.dht.put_value(kad_key, envelope_cbor)
 
     async def get_signed_identity_record(
         self, object_key_hex: str, quorum: int = 0
-    ) -> dict[str, Any] | None:
-        """Retrieve and verify an identity record under the DHT key.
-
-        Preference order:
-        1) DHT (freshness)
-        2) durable_store cache (durability)
-        """
-
+    ) -> dict[str, Any] | IdentityRecordResult | None:
         record_key = bytes.fromhex(object_key_hex)
         kad_key = self._kad_key(object_key_hex, kind="identity")
-
-        def _decode_and_build(raw: bytes) -> dict[str, Any] | None:
-            try:
-                res = self._validator.validate_identity_get(
-                    record_key=record_key, envelope_cbor=raw
-                )
-                return {
-                    "object_key": object_key_hex,
-                    "owner_name": res.owner_name_hex,
-                    "owner_public_key": res.owner_public_key.hex(),
-                    "seq": int(res.seq),
-                }
-            except Exception:
-                return None
-
-        # 1) Try DHT first
+        raw_dht = await self._read_dht_value(kad_key, quorum=quorum)
+        raw_local = self._durable_get(kind="identity", key=record_key)
+        if _is_multisignature_envelope(raw_dht) or _is_multisignature_envelope(raw_local):
+            raw_current = _select_newest_envelope(raw_dht, raw_local)
+        else:
+            raw_current = raw_dht if raw_dht is not None else raw_local
+        if raw_current is None:
+            return None
         try:
-            raw_dht = await self.dht.get_value(kad_key, quorum=quorum)
+            result = self._validator.validate_identity_get(
+                record_key=record_key, envelope_cbor=raw_current
+            )
         except Exception:
-            raw_dht = None
-
-        if raw_dht is not None:
-            if self._durable_store is not None:
-                self._durable_store.put(
-                    kind="identity", key=record_key, value=raw_dht
-                )
-            return _decode_and_build(raw_dht)
-
-        # 2) Fallback local cache
-        if self._durable_store is None:
             return None
-
-        raw_local = self._durable_store.get(kind="identity", key=record_key)
-        if raw_local is None:
-            return None
-
-        return _decode_and_build(raw_local)
+        if isinstance(result, IdentityRecordResult):
+            decoded: dict[str, Any] | IdentityRecordResult = result
+        else:
+            decoded = {
+                "object_key": object_key_hex,
+                "owner_name": result.owner_name_hex,
+                "owner_public_key": result.owner_public_key.hex(),
+                "seq": int(result.seq),
+            }
+        if self._durable_store is not None and raw_current == raw_dht:
+            self._durable_cache(
+                kind="identity", key=record_key, value=raw_current, result=result
+            )
+        return decoded
 
     async def get_signed_provider_record(
         self, object_hash: str, quorum: int = 0
-    ) -> ProviderPayloadV1 | None:
+    ) -> ProviderPayloadV1 | ProviderRecordResult | None:
         record_key = bytes.fromhex(object_hash)
         kad_key = self._kad_key(object_hash)
-
-        def _decode_and_build(raw: bytes) -> ProviderPayloadV1 | None:
-            try:
-                return self._validator.validate_provider_get(
-                    record_key=record_key, envelope_cbor=raw
-                )
-            except Exception:
-                return None
-
-        # 1) Try DHT first
+        raw_dht = await self._read_dht_value(kad_key, quorum=quorum)
+        raw_local = self._durable_get(kind="provider", key=record_key)
+        raw_current = _select_newest_envelope(raw_dht, raw_local)
+        if raw_current is None:
+            return None
         try:
-            raw_dht = await self.dht.get_value(kad_key, quorum=quorum)
+            result = self._validator.validate_provider_get(
+                record_key=record_key, envelope_cbor=raw_current
+            )
         except Exception:
-            raw_dht = None
-
-        if raw_dht is not None:
-            if self._durable_store is not None:
-                self._durable_store.put(
-                    kind="provider", key=record_key, value=raw_dht
-                )
-            return _decode_and_build(raw_dht)
-
-        # 2) Fallback local cache
-        if self._durable_store is None:
             return None
-
-        raw_local = self._durable_store.get(kind="provider", key=record_key)
-        if raw_local is None:
-            return None
-
-        return _decode_and_build(raw_local)
+        if self._durable_store is not None and raw_current == raw_dht:
+            self._durable_cache(
+                kind="provider", key=record_key, value=raw_current, result=result
+            )
+        return result
