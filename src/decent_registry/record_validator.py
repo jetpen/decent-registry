@@ -95,6 +95,18 @@ class ProviderRecordResult:
     def endpoints(self) -> list[str]:
         return self.payload.endpoints
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "object_key": self.object_hash,
+            "object_hash": self.object_hash,
+            "alg": self.alg,
+            "version": self.version,
+            "provider_url": self.provider_url,
+            "endpoints": self.endpoints,
+            "seq": self.seq,
+            "authorization": self.authorization.to_dict(),
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class IdentityRecordResult:

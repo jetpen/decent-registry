@@ -20,6 +20,21 @@ from decent_registry.config import (
     resolve_required_owner_privkey_pem_path,
     resolve_server_config,
 )
+from decent_registry.crypto_utils import load_ed25519_keypair_from_privkey_pem_path
+from decent_registry.encoding import (
+    OPERATION_GENESIS,
+    OPERATION_ORDINARY_UPDATE,
+    OPERATION_REPLACE_SIGNERS,
+    OPERATION_UPGRADE,
+)
+from decent_registry.multisig_bundle import (
+    MultisignatureBundle,
+    draft_identity_bundle,
+    draft_provider_bundle,
+    finalize_bundle,
+    merge_proof,
+    sign_bundle,
+)
 from libp2p.crypto.ed25519 import Ed25519PrivateKey, create_new_key_pair
 from libp2p.crypto.keys import KeyPair
 
@@ -50,6 +65,162 @@ def _parse_endpoints(values: list[str]) -> list[str]:
         parts = [p.strip() for p in v.split(",") if p.strip()]
         eps.extend(parts)
     return eps
+
+
+_OPERATION_NAMES = {
+    "genesis": OPERATION_GENESIS,
+    "ordinary-update": OPERATION_ORDINARY_UPDATE,
+    "replace-signers": OPERATION_REPLACE_SIGNERS,
+    "upgrade": OPERATION_UPGRADE,
+}
+
+
+def _parse_hex_value(value: str, *, name: str, length: int | None = None) -> bytes:
+    try:
+        decoded = bytes.fromhex(value)
+    except ValueError:
+        raise ValueError(f"{name} must be hexadecimal") from None
+    if length is not None and len(decoded) != length:
+        raise ValueError(f"{name} must be {length} bytes")
+    return decoded
+
+
+def _parse_signer_set(values: list[str]) -> list[dict[int, Any]]:
+    if not values:
+        raise ValueError("at least one --signer is required")
+    entries: list[dict[int, Any]] = []
+    seen_ids: set[str] = set()
+    seen_keys: set[bytes] = set()
+    for value in values:
+        signer_id, separator, public_key_hex = value.partition("=")
+        if not separator or not signer_id:
+            raise ValueError("--signer must use ID=PUBLIC_KEY_HEX")
+        if signer_id in seen_ids:
+            raise ValueError("duplicate signer identifier")
+        public_key = _parse_hex_value(
+            public_key_hex, name=f"public key for signer {signer_id}", length=32
+        )
+        if public_key in seen_keys:
+            raise ValueError("duplicate signer public key")
+        seen_ids.add(signer_id)
+        seen_keys.add(public_key)
+        entries.append({1: signer_id, 2: public_key})
+    return sorted(entries, key=lambda entry: entry[1].encode("utf-8"))
+
+
+def _read_cli_bytes(path: str, *, description: str) -> bytes:
+    try:
+        return Path(path).read_bytes()
+    except OSError:
+        raise ValueError(f"cannot read {description} file") from None
+
+
+def _write_cli_bytes(path: str, value: bytes, *, description: str) -> None:
+    try:
+        Path(path).write_bytes(value)
+    except OSError:
+        raise ValueError(f"cannot write {description} file") from None
+
+
+def _bundle_draft_command(args: argparse.Namespace) -> int:
+    signer_set = _parse_signer_set(args.signer)
+    owner_public_key = _parse_hex_value(
+        args.owner_public_key, name="owner public key", length=32
+    )
+    predecessor_state_hash = _parse_hex_value(
+        args.predecessor_state_hash, name="predecessor state hash", length=32
+    )
+    operation = _OPERATION_NAMES[args.operation]
+    if args.record_type == "identity":
+        owner_name = _parse_hex_value(args.owner_name, name="owner name")
+        bundle = draft_identity_bundle(
+            owner_name=owner_name,
+            owner_public_key=owner_public_key,
+            seq=args.seq,
+            signer_set=signer_set,
+            threshold=args.threshold,
+            epoch=args.epoch,
+            predecessor_state_hash=predecessor_state_hash,
+            operation=operation,
+        )
+    else:
+        object_hash = args.object_hash.lower()
+        _parse_hex_value(object_hash, name="object hash", length=32)
+        bundle = draft_provider_bundle(
+            object_hash=object_hash,
+            provider_url=args.provider_url,
+            endpoints=_parse_endpoints(args.endpoint),
+            owner_public_key=owner_public_key,
+            seq=args.seq,
+            signer_set=signer_set,
+            threshold=args.threshold,
+            epoch=args.epoch,
+            predecessor_state_hash=predecessor_state_hash,
+            operation=operation,
+            alg=args.alg,
+            version=args.payload_version,
+        )
+    _write_cli_bytes(args.output, bundle.to_cbor(), description="bundle output")
+    return 0
+
+
+def _bundle_sign_command(args: argparse.Namespace) -> int:
+    bundle = MultisignatureBundle.from_cbor(
+        _read_cli_bytes(args.input, description="bundle input")
+    )
+    if bundle.proofs:
+        raise ValueError("bundle sign requires an unsigned bundle; use merge for existing proofs")
+    signer_private_key, _public_key = load_ed25519_keypair_from_privkey_pem_path(
+        args.signer_privkey
+    )
+    proof_bundle = MultisignatureBundle(
+        signed_update_bytes=bundle.signed_update_bytes,
+        proofs=(sign_bundle(bundle, signer_private_key),),
+    )
+    _write_cli_bytes(args.output, proof_bundle.to_cbor(), description="proof output")
+    return 0
+
+
+def _bundle_merge_command(args: argparse.Namespace) -> int:
+    bundle = MultisignatureBundle.from_cbor(
+        _read_cli_bytes(args.input, description="bundle input")
+    )
+    for proof_path in args.proof:
+        proof_bundle = MultisignatureBundle.from_cbor(
+            _read_cli_bytes(proof_path, description="proof input")
+        )
+        if not proof_bundle.proofs:
+            raise ValueError("proof input contains no proofs")
+        for proof in proof_bundle.proofs:
+            bundle = merge_proof(bundle, proof)
+    _write_cli_bytes(args.output, bundle.to_cbor(), description="merged bundle output")
+    return 0
+
+
+def _bundle_finalize_command(args: argparse.Namespace) -> int:
+    bundle = MultisignatureBundle.from_cbor(
+        _read_cli_bytes(args.input, description="bundle input")
+    )
+    finalized = finalize_bundle(bundle)
+    _write_cli_bytes(args.output, finalized, description="SignedEnvelope output")
+    return 0
+
+
+def _bundle_command(args: argparse.Namespace) -> int:
+    try:
+        if args.bundle_action == "draft":
+            return _bundle_draft_command(args)
+        if args.bundle_action == "sign":
+            return _bundle_sign_command(args)
+        if args.bundle_action == "merge":
+            return _bundle_merge_command(args)
+        if args.bundle_action == "finalize":
+            return _bundle_finalize_command(args)
+        raise ValueError(f"unknown bundle operation: {args.bundle_action}")
+    except (OSError, TypeError, ValueError) as exc:
+        logger.error("bundle %s failed: %s", args.bundle_action, exc)
+        print("bundle operation failed")
+        return 1
 
 
 def _add_network_args(p: argparse.ArgumentParser) -> None:
@@ -208,7 +379,19 @@ def _put_provider_command(args: argparse.Namespace) -> int:
     args.mapsize = client_cfg.mapsize_bytes
     args.verbose = client_cfg.verbosity
 
-    args.owner_privkey = resolve_required_owner_privkey_pem_path(client_cfg)
+    if args.finalized_envelope is None:
+        if args.provider_url is None or args.seq is None:
+            logger.error("legacy provider submission requires --provider-url and --seq")
+            return 1
+        args.owner_privkey = resolve_required_owner_privkey_pem_path(client_cfg)
+    elif (
+        args.provider_url is not None
+        or args.owner_privkey is not None
+        or args.endpoint
+        or args.seq is not None
+    ):
+        logger.error("finalized provider submission cannot include legacy signing arguments")
+        return 1
     _configure_logging(client_cfg.verbosity)
 
     async def _async_put() -> int:
@@ -223,15 +406,23 @@ def _put_provider_command(args: argparse.Namespace) -> int:
             await trio.sleep(1.0)
 
             service = RegistryService(dht=dht)
-            await service.put_provider(
-                object_hash=args.object_hash,
-                provider_url=args.provider_url,
-                owner_privkey_pem_path=args.owner_privkey,
-                seq=int(args.seq),
-                endpoints=endpoints,
-                alg="Ed25519",
-                version=1,
-            )
+            if args.finalized_envelope is not None:
+                await service.put_provider(
+                    object_hash=args.object_hash,
+                    envelope_cbor=_read_cli_bytes(
+                        args.finalized_envelope, description="finalized SignedEnvelope"
+                    ),
+                )
+            else:
+                await service.put_provider(
+                    object_hash=args.object_hash,
+                    provider_url=args.provider_url,
+                    owner_privkey_pem_path=args.owner_privkey,
+                    seq=int(args.seq) if args.seq is not None else 1,
+                    endpoints=endpoints,
+                    alg="Ed25519",
+                    version=1,
+                )
             print(1)
             return 0
 
@@ -273,16 +464,15 @@ def _get_provider_command(args: argparse.Namespace) -> int:
                 print("not found")
                 return 1
 
-            payload = {
-                "object_key": args.object_hash,
-                "provider_url": provider_payload.provider_url,
-                "endpoints": provider_payload.endpoints,
-            }
-            authorization = getattr(provider_payload, "authorization", None)
-            seq = getattr(provider_payload, "seq", None)
-            if authorization is not None and seq is not None:
-                payload["seq"] = int(seq)
-                payload["authorization"] = authorization.to_dict()
+            to_dict = getattr(provider_payload, "to_dict", None)
+            if callable(to_dict):
+                payload = to_dict()
+            else:
+                payload = {
+                    "object_key": args.object_hash,
+                    "provider_url": provider_payload.provider_url,
+                    "endpoints": provider_payload.endpoints,
+                }
             print(json.dumps(payload, indent=2, sort_keys=True))
             return 0
 
@@ -301,7 +491,14 @@ def _put_identity_command(args: argparse.Namespace) -> int:
     args.mapsize = client_cfg.mapsize_bytes
     args.verbose = client_cfg.verbosity
 
-    args.owner_privkey = resolve_required_owner_privkey_pem_path(client_cfg)
+    if args.finalized_envelope is None:
+        if args.seq is None:
+            logger.error("legacy identity submission requires --seq")
+            return 1
+        args.owner_privkey = resolve_required_owner_privkey_pem_path(client_cfg)
+    elif args.owner_privkey is not None or args.seq is not None:
+        logger.error("finalized identity submission cannot include legacy signing arguments")
+        return 1
     _configure_logging(client_cfg.verbosity)
 
     async def _async_put() -> int:
@@ -315,11 +512,19 @@ def _put_identity_command(args: argparse.Namespace) -> int:
             await trio.sleep(1.0)
 
             service = RegistryService(dht=dht)
-            await service.put_identity(
-                owner_name_hex=args.owner_name,
-                owner_privkey_pem_path=args.owner_privkey,
-                seq=int(args.seq),
-            )
+            if args.finalized_envelope is not None:
+                await service.put_identity(
+                    owner_name_hex=args.owner_name,
+                    envelope_cbor=_read_cli_bytes(
+                        args.finalized_envelope, description="finalized SignedEnvelope"
+                    ),
+                )
+            else:
+                await service.put_identity(
+                    owner_name_hex=args.owner_name,
+                    owner_privkey_pem_path=args.owner_privkey,
+                    seq=int(args.seq) if args.seq is not None else 1,
+                )
             print(1)
             return 0
 
@@ -393,21 +598,94 @@ def main(argv: list[str] | None = None) -> None:
     )
     _add_datastore_args(node_p)
 
+    # bundle
+    bundle_p = subparsers.add_parser(
+        "bundle", help="Create, sign, merge, and finalize a Multisignature Bundle"
+    )
+    bundle_sub = bundle_p.add_subparsers(dest="bundle_action", required=True)
+
+    bundle_draft_p = bundle_sub.add_parser(
+        "draft", help="Create an unsigned canonical Multisignature Bundle"
+    )
+    bundle_draft_sub = bundle_draft_p.add_subparsers(
+        dest="record_type", required=True
+    )
+
+    def _add_bundle_draft_common(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--owner-public-key", required=True)
+        p.add_argument("--seq", type=int, required=True)
+        p.add_argument("--threshold", type=int, default=2)
+        p.add_argument("--epoch", type=int, default=1)
+        p.add_argument(
+            "--predecessor-state-hash", default=(bytes(32).hex())
+        )
+        p.add_argument(
+            "--operation",
+            choices=sorted(_OPERATION_NAMES),
+            default="genesis",
+        )
+        p.add_argument(
+            "--signer",
+            action="append",
+            required=True,
+            help="Signer Set member as ID=PUBLIC_KEY_HEX; may repeat",
+        )
+        p.add_argument("--output", required=True)
+
+    bundle_draft_identity_p = bundle_draft_sub.add_parser(
+        "identity", help="Draft an Identity Record Multisignature Bundle"
+    )
+    bundle_draft_identity_p.add_argument("--owner-name", required=True)
+    _add_bundle_draft_common(bundle_draft_identity_p)
+
+    bundle_draft_provider_p = bundle_draft_sub.add_parser(
+        "provider", help="Draft a Provider Record Multisignature Bundle"
+    )
+    bundle_draft_provider_p.add_argument("--object-hash", required=True)
+    bundle_draft_provider_p.add_argument("--provider-url", required=True)
+    bundle_draft_provider_p.add_argument(
+        "--endpoint", action="append", default=[], help="Provider multiaddr"
+    )
+    bundle_draft_provider_p.add_argument("--alg", default="Ed25519")
+    bundle_draft_provider_p.add_argument("--payload-version", type=int, default=1)
+    _add_bundle_draft_common(bundle_draft_provider_p)
+
+    bundle_sign_p = bundle_sub.add_parser(
+        "sign", help="Sign one local Multisignature Bundle"
+    )
+    bundle_sign_p.add_argument("--input", required=True)
+    bundle_sign_p.add_argument("--signer-privkey", required=True)
+    bundle_sign_p.add_argument("--output", required=True)
+
+    bundle_merge_p = bundle_sub.add_parser(
+        "merge", help="Merge detached proof bundle files"
+    )
+    bundle_merge_p.add_argument("--input", required=True)
+    bundle_merge_p.add_argument(
+        "--proof", action="append", required=True, help="Proof bundle file; may repeat"
+    )
+    bundle_merge_p.add_argument("--output", required=True)
+
+    bundle_finalize_p = bundle_sub.add_parser(
+        "finalize", help="Finalize a threshold-complete Multisignature Bundle"
+    )
+    bundle_finalize_p.add_argument("--input", required=True)
+    bundle_finalize_p.add_argument("--output", required=True)
+
     # put
     put_p = subparsers.add_parser("put", help="Publish a signed record")
     put_sub = put_p.add_subparsers(dest="record_type", required=True)
 
     put_provider_p = put_sub.add_parser(
         "provider",
-        help="Publish a signed provider update",
+        help="Publish a signed Provider SignedUpdate or finalized SignedEnvelope",
         description=(
             "Publish a signed provider record under `--object-hash` (DHT key).\n\n"
             "Required:\n"
             "- --object-hash <64-hex>\n"
-            "- --provider-url <url>\n"
-            "- --owner-privkey <owner_privkey_pem_path>\n"
-            "- --seq <monotonic int>\n\n"
-            "Optional:\n"
+            "- legacy mode: --provider-url, --owner-privkey, and --seq\n"
+            "- finalized mode: --finalized-envelope <path>\n\n"
+            "Optional in legacy mode:\n"
             "- --endpoint <multiaddr> (repeatable/comma-separated)"
         ),
         formatter_class=argparse.RawTextHelpFormatter,
@@ -420,14 +698,20 @@ def main(argv: list[str] | None = None) -> None:
     _add_network_args(put_provider_p)
     _add_datastore_args(put_provider_p)
     put_provider_p.add_argument("--object-hash", dest="object_hash", required=True)
-    put_provider_p.add_argument("--provider-url", dest="provider_url", required=True)
+    put_provider_p.add_argument("--provider-url", dest="provider_url", required=False)
     put_provider_p.add_argument(
         "--owner-privkey",
         dest="owner_privkey",
         required=False,
         help="Path to an Ed25519 private key PEM file (optional if supplied in CLI config)",
     )
-    put_provider_p.add_argument("--seq", type=int, default=1, help="Monotonic seq number")
+    put_provider_p.add_argument(
+        "--finalized-envelope",
+        dest="finalized_envelope",
+        default=None,
+        help="Submit a finalized SignedEnvelope file without private-key material",
+    )
+    put_provider_p.add_argument("--seq", type=int, default=None, help="Monotonic seq number")
     put_provider_p.add_argument(
         "--endpoint",
         action="append",
@@ -437,15 +721,15 @@ def main(argv: list[str] | None = None) -> None:
 
     put_identity_p = put_sub.add_parser(
         "identity",
-        help="Publish a signed identity update",
+        help="Publish a signed Identity SignedUpdate or finalized SignedEnvelope",
         description=(
             "Publish a signed identity record.\n\n"
             "Lookup key derivation:\n"
             "- DHT key object_key = sha256(owner_name_bytes)\n\n"
             "Required:\n"
             "- --owner-name <hex bytes>\n"
-            "- --owner-privkey <owner_privkey_pem_path>\n"
-            "- --seq <monotonic int>"
+            "- legacy mode: --owner-privkey and --seq\n"
+            "- finalized mode: --finalized-envelope <path>"
         ),
         formatter_class=argparse.RawTextHelpFormatter,
     )
@@ -463,7 +747,13 @@ def main(argv: list[str] | None = None) -> None:
         required=False,
         help="Path to an Ed25519 private key PEM file (optional if supplied in CLI config)",
     )
-    put_identity_p.add_argument("--seq", type=int, default=1, help="Monotonic seq number")
+    put_identity_p.add_argument(
+        "--finalized-envelope",
+        dest="finalized_envelope",
+        default=None,
+        help="Submit a finalized SignedEnvelope file without private-key material",
+    )
+    put_identity_p.add_argument("--seq", type=int, default=None, help="Monotonic seq number")
 
     # get
     get_p = subparsers.add_parser("get", help="Resolve a signed record")
@@ -533,6 +823,8 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(_node_command(args))
     if args.cmd == "keygen":
         raise SystemExit(_keygen_command(args))
+    if args.cmd == "bundle":
+        raise SystemExit(_bundle_command(args))
     if args.cmd == "put":
         if args.record_type == "provider":
             raise SystemExit(_put_provider_command(args))
