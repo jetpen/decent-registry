@@ -150,7 +150,7 @@ Current implementation details are linked to the canonical protocol, setup, conf
 4. Signatures are collected until two distinct valid signatures are present.
 5. A partial bundle with fewer than two valid signatures is rejected and cannot be submitted as an authorized update.
 6. The final bundle of signed records is submitted to the Registry.
-7. A future validator verifies signer-set membership, target and predecessor-state binding, and sequence and epoch advancement.
+7. The pure authorization validator verifies signer-set membership, target and predecessor-state binding, and sequence and epoch advancement; Registry integration remains future work.
 8. If one signer is lost or compromised, the two remaining signers authorize a complete replacement signer set in one state transition.
 
 **Services involved:** The Registry and a proposed Identity authorization convention.

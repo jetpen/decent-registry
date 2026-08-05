@@ -149,7 +149,7 @@ The interactive grilling confirmed:
 1. Scenario scope covers Registry, Identity, Storage, Social, a cross-domain application, and a dedicated 2-of-3 multisignature Identity Record scenario.
 2. Every scenario uses the confirmed template fields above.
 3. The multisignature scenario uses the bundle flow: draft, circulate, local signing, collect two distinct signatures, reject partial bundles, and submit the final bundle.
-4. The multisignature flow is researched but unimplemented and must not imply current CLI support.
+4. The local Python multisignature bundle flow is code-backed; the CLI, Registry, and DHT flow remains future work and must not imply current CLI support.
 5. Issue #83 extended the catalog with an eighth scenario: Re-host a censored document under a stable content hash.
 6. Issue #84 extended the catalog with a ninth scenario: Publish and resolve a web-page `kad:` link through a Chromium extension.
 
