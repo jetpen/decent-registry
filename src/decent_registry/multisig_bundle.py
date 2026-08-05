@@ -5,6 +5,7 @@ from typing import Any, Mapping, Sequence
 
 from decent_registry.encoding import (
     OPERATION_GENESIS,
+    OPERATION_UPGRADE,
     RECORD_KIND_IDENTITY,
     RECORD_KIND_PROVIDER,
     encode_multisignature_signed_update,
@@ -318,8 +319,21 @@ def finalize_bundle(bundle: MultisignatureBundle) -> bytes:
             raise ValueError("duplicate proof signer")
         seen.add(proof.signer_id)
         _validate_proof(bundle, proof)
-    if len(seen) < bundle.threshold:
+
+    if bundle.authorization[3] == OPERATION_UPGRADE:
+        if len(seen) != 1:
+            raise ValueError("upgrade requires one legacy owner proof")
+        owner_public_key = (
+            bytes(bundle.signed_update[1][2])
+            if bundle.record_kind == RECORD_KIND_IDENTITY
+            else bytes(bundle.signed_update[1][1])
+        )
+        proof = bundle.proofs[0]
+        if dict(bundle.signer_set).get(proof.signer_id) != owner_public_key:
+            raise ValueError("upgrade proof must be from the legacy owner")
+    elif len(seen) < bundle.threshold:
         raise ValueError("threshold not met")
+
     return encode_multisignature_envelope(
         signed_update_bytes=bundle.signed_update_bytes,
         proofs=[proof.to_wire() for proof in bundle.proofs],
