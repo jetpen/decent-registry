@@ -168,11 +168,16 @@ def _bundle_sign_command(args: argparse.Namespace) -> int:
     bundle = MultisignatureBundle.from_cbor(
         _read_cli_bytes(args.input, description="bundle input")
     )
+    if bundle.proofs:
+        raise ValueError("bundle sign requires an unsigned bundle; use merge for existing proofs")
     signer_private_key, _public_key = load_ed25519_keypair_from_privkey_pem_path(
         args.signer_privkey
     )
-    signed_bundle = merge_proof(bundle, sign_bundle(bundle, signer_private_key))
-    _write_cli_bytes(args.output, signed_bundle.to_cbor(), description="signed bundle output")
+    proof_bundle = MultisignatureBundle(
+        signed_update_bytes=bundle.signed_update_bytes,
+        proofs=(sign_bundle(bundle, signer_private_key),),
+    )
+    _write_cli_bytes(args.output, proof_bundle.to_cbor(), description="proof output")
     return 0
 
 
@@ -459,16 +464,15 @@ def _get_provider_command(args: argparse.Namespace) -> int:
                 print("not found")
                 return 1
 
-            payload = {
-                "object_key": args.object_hash,
-                "provider_url": provider_payload.provider_url,
-                "endpoints": provider_payload.endpoints,
-            }
-            authorization = getattr(provider_payload, "authorization", None)
-            seq = getattr(provider_payload, "seq", None)
-            if authorization is not None and seq is not None:
-                payload["seq"] = int(seq)
-                payload["authorization"] = authorization.to_dict()
+            to_dict = getattr(provider_payload, "to_dict", None)
+            if callable(to_dict):
+                payload = to_dict()
+            else:
+                payload = {
+                    "object_key": args.object_hash,
+                    "provider_url": provider_payload.provider_url,
+                    "endpoints": provider_payload.endpoints,
+                }
             print(json.dumps(payload, indent=2, sort_keys=True))
             return 0
 
@@ -674,7 +678,7 @@ def main(argv: list[str] | None = None) -> None:
 
     put_provider_p = put_sub.add_parser(
         "provider",
-        help="Publish a signed provider update",
+        help="Publish a signed Provider SignedUpdate or finalized SignedEnvelope",
         description=(
             "Publish a signed provider record under `--object-hash` (DHT key).\n\n"
             "Required:\n"
@@ -717,7 +721,7 @@ def main(argv: list[str] | None = None) -> None:
 
     put_identity_p = put_sub.add_parser(
         "identity",
-        help="Publish a signed identity update",
+        help="Publish a signed Identity SignedUpdate or finalized SignedEnvelope",
         description=(
             "Publish a signed identity record.\n\n"
             "Lookup key derivation:\n"

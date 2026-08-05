@@ -274,6 +274,21 @@ def test_cli_bundle_rejects_incomplete_duplicate_and_nonmember_proofs(tmp_path: 
     )
     assert signed.returncode == 0
 
+    resign_path = _write_keypair_pem(tmp_path, keypairs[1], "member-b.pem")
+    resign = _run_cli(
+        [
+            "bundle",
+            "sign",
+            "--input",
+            str(partial_path),
+            "--signer-privkey",
+            str(resign_path),
+            "--output",
+            str(tmp_path / "resigned.cbor"),
+        ]
+    )
+    assert resign.returncode != 0
+
     other_draft_path = tmp_path / "other-draft.cbor"
     other_partial_path = tmp_path / "other-partial.cbor"
     other_draft = _run_cli(
@@ -535,6 +550,10 @@ def test_cli_put_get_finalized_envelopes_without_private_keys(tmp_path: Path):
     )
     assert get_provider.returncode == 0, f"provider get failed: {get_provider.stdout} {get_provider.stderr}"
     provider_record = json.loads(get_provider.stdout)
+    assert provider_record["object_key"] == object_hash
+    assert provider_record["object_hash"] == object_hash
+    assert provider_record["alg"] == "Ed25519"
+    assert provider_record["version"] == 1
     assert provider_record["provider_url"] == "https://example.com/finalized.bin"
     assert provider_record["seq"] == 1
     assert provider_record["authorization"]["threshold"] == 2
