@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
 import hashlib
 from typing import Any
 
@@ -57,6 +58,14 @@ def test_identity_draft_is_canonical_and_has_no_proofs_or_private_key_material()
     assert is_canonical_cbor(wire)
     assert keypairs[0].private_key.to_bytes() not in wire
     assert decode_multisignature_envelope(wire).proofs == ()
+
+
+def test_bundle_objects_are_immutable():
+    bundle = _draft_identity(_keypairs())
+
+    with pytest.raises(FrozenInstanceError):
+        setattr(bundle, "proofs", ())
+
 
 
 def test_provider_draft_contains_the_complete_provider_payload():
@@ -154,6 +163,7 @@ def test_finalize_rejects_partial_bundle_and_returns_threshold_valid_envelope():
 
     complete = merge_proof(partial, sign_bundle(bundle, keypairs[1].private_key))
     envelope = finalize_bundle(complete)
+    assert is_canonical_cbor(envelope)
     decoded = decode_multisignature_envelope(envelope)
 
     assert decoded.signed_update_bytes == bundle.signed_update_bytes
