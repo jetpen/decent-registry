@@ -544,6 +544,61 @@ def validate_multisignature_genesis(
     return _candidate_state(record_key=record_key, parsed=parsed)
 
 
+def validate_multisignature_envelope(
+    *, record_key: bytes, envelope_cbor: bytes
+) -> MultisignatureState:
+    """Validate an accepted multisignature envelope without a predecessor.
+
+    Put validation uses ``validate_multisignature_update`` for the complete
+    transition. This entry point is for get paths and for reconstructing the
+    currently accepted state before validating its successor.
+    """
+    parsed = _decode_multisignature_candidate(envelope_cbor)
+    authorization = parsed[7]
+    if parsed[6] != record_key:
+        raise ValueError("lookup-key mismatch")
+
+    operation = authorization[3]
+    if operation == OPERATION_GENESIS:
+        return validate_multisignature_genesis(
+            record_key=record_key,
+            envelope_cbor=envelope_cbor,
+        )
+
+    if operation == OPERATION_UPGRADE:
+        if authorization[4] != 1:
+            raise ValueError("upgrade epoch must be 1")
+        _require_complete_2_of_3(authorization)
+        if len(parsed[1].proofs) != 1:
+            raise ValueError("upgrade requires one legacy owner proof")
+        owner_public_key = bytes(parsed[3][2] if parsed[7][2] == RECORD_KIND_IDENTITY else parsed[3][1])
+        expected_signer_id = _signer_id_for_public_key(authorization, owner_public_key)
+        proof = parsed[1].proofs[0]
+        if proof[1] != expected_signer_id:
+            raise ValueError("legacy owner proof signer_id mismatch")
+        try:
+            valid = verify_ed25519_signature(
+                owner_public_key=owner_public_key,
+                signed_update_bytes_canonical=parsed[0],
+                signature=proof[2],
+            )
+        except Exception as exc:
+            raise ValueError("invalid legacy owner proof") from exc
+        if not valid:
+            raise ValueError("invalid legacy owner proof")
+        return _candidate_state(record_key=record_key, parsed=parsed)
+
+    if operation not in {OPERATION_ORDINARY_UPDATE, OPERATION_REPLACE_SIGNERS}:
+        raise ValueError(f"unsupported multisignature operation: {operation}")
+    _validate_threshold_proofs(
+        signed_update_bytes=parsed[0],
+        envelope=parsed[1],
+        signer_set=_signer_tuple(authorization),
+        threshold=authorization[5],
+    )
+    return _candidate_state(record_key=record_key, parsed=parsed)
+
+
 def validate_multisignature_ordinary_update(
     *, record_key: bytes, envelope_cbor: bytes, current_state: MultisignatureState
 ) -> MultisignatureState:

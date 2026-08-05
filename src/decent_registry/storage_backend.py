@@ -22,3 +22,13 @@ class StorageBackend(Protocol):
         kind: Literal["provider", "identity"],
         key: bytes,
     ) -> bytes | None: ...
+
+    def put_if_newer(
+        self,
+        *,
+        kind: Literal["provider", "identity"],
+        key: bytes,
+        value: bytes,
+        seq: int,
+        state_hash: bytes,
+    ) -> bool: ...

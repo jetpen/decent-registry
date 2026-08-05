@@ -278,6 +278,11 @@ def _get_provider_command(args: argparse.Namespace) -> int:
                 "provider_url": provider_payload.provider_url,
                 "endpoints": provider_payload.endpoints,
             }
+            authorization = getattr(provider_payload, "authorization", None)
+            seq = getattr(provider_payload, "seq", None)
+            if authorization is not None and seq is not None:
+                payload["seq"] = int(seq)
+                payload["authorization"] = authorization.to_dict()
             print(json.dumps(payload, indent=2, sort_keys=True))
             return 0
 
@@ -356,7 +361,11 @@ def _get_identity_command(args: argparse.Namespace) -> int:
                 print("not found")
                 return 1
 
-            print(json.dumps(record, indent=2, sort_keys=True))
+            record_payload: Any = record
+            to_dict = getattr(record_payload, "to_dict", None)
+            if callable(to_dict):
+                record_payload = to_dict()
+            print(json.dumps(record_payload, indent=2, sort_keys=True))
             return 0
 
     return trio.run(_async_get)
