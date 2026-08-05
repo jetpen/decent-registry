@@ -95,8 +95,8 @@ Each scenario uses these fields:
   8. For a lost or compromised signer, the two remaining signers authorize a complete replacement signer set in one state transition.
 - **Services involved:** Registry and proposed Identity authorization convention.
 - **Sovereignty and privacy properties:** A single lost key does not necessarily prevent updates; collective authorization reduces dependence on one signer. Private-key secrecy remains absolute.
-- **Current-versus-future status:** The workflow is researched and unimplemented. Current CLI and validator paths do not support multisignature bundles.
-- **Limitations:** Two lost or compromised signers cannot be recovered through ordinary 2-of-3 authorization. Bundle transport, signer identity, canonical format, replay protection, recovery policy, and application tooling require future design and implementation.
+- **Current-versus-future status:** The local Python bundle workflow is implemented and code-backed for drafting, local signing, proof merging, and threshold finalization. CLI commands, Registry put/get integration, and DHT submission remain future work.
+- **Limitations:** Two lost or compromised signers cannot be recovered through ordinary 2-of-3 authorization. CLI transport, recovery policy, application tooling, and production Registry integration require future design and implementation.
 
 ### 7. Build a cross-domain application
 
@@ -149,7 +149,7 @@ The interactive grilling confirmed:
 1. Scenario scope covers Registry, Identity, Storage, Social, a cross-domain application, and a dedicated 2-of-3 multisignature Identity Record scenario.
 2. Every scenario uses the confirmed template fields above.
 3. The multisignature scenario uses the bundle flow: draft, circulate, local signing, collect two distinct signatures, reject partial bundles, and submit the final bundle.
-4. The multisignature flow is researched but unimplemented and must not imply current CLI support.
+4. The local Python multisignature bundle flow is code-backed; the CLI, Registry, and DHT flow remains future work and must not imply current CLI support.
 5. Issue #83 extended the catalog with an eighth scenario: Re-host a censored document under a stable content hash.
 6. Issue #84 extended the catalog with a ninth scenario: Publish and resolve a web-page `kad:` link through a Chromium extension.
 

@@ -252,6 +252,24 @@ All proof signatures must be distinct, valid Ed25519 signatures from the
 required current signer set. This module provides pure transition validation;
 put/get and durable accepted-state integration remain follow-up work.
 
+### 6.3) Local Multisignature Bundle workflow
+
+`decent_registry.multisig_bundle` provides local-only workflow operations:
+
+1. `draft_identity_bundle` or `draft_provider_bundle` creates canonical
+   SignedUpdate bytes and an empty proof collection.
+2. `sign_bundle` accepts exactly one caller-local Ed25519 private key and
+   returns a detached proof. The private key is not stored in the bundle.
+3. `merge_proof` verifies exact SignedUpdate binding, signer membership,
+   duplicate rejection, and the Ed25519 signature before adding a proof.
+4. `finalize_bundle` rejects a partial bundle and returns a versioned
+   SignedEnvelope only after the threshold of distinct valid proofs is met.
+
+Bundles may be serialized as canonical versioned envelope-shaped CBOR while
+partial. They are local signing artifacts, not accepted Registry state. CLI
+commands are specified separately by issue #96; Registry put/get integration
+is specified by issue #95.
+
 ---
 
 ## 7) Overwrite rules: seq monotonicity + owner binding

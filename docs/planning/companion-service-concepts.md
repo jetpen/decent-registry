@@ -8,7 +8,7 @@
 
 This document defines user-facing concepts and boundaries only. It does not define production wire protocols, schemas, endpoints, or implementations for companion services.
 
-The registry is **implemented and code-backed**. Identity, storage, and social services are **proposed designs** that build on registry records where appropriate. Identity recovery and multisignature material cited below is **researched but unimplemented**.
+The registry is **implemented and code-backed**. Identity, storage, and social services are **proposed designs** that build on registry records where appropriate. Identity recovery and production multisignature integration material cited below is **researched but unimplemented**; local Python bundle operations are code-backed separately.
 
 ## Service definitions and boundaries
 
@@ -25,7 +25,7 @@ The registry is **implemented and code-backed**. Identity, storage, and social s
 - **Status:** Proposed service convention, building on the implemented Identity Record.
 - **Published material:** Registry records contain public verification material only: Owner Name, Owner Public Key values, aliases, and relationships among those records.
 - **Private-key boundary:** No convention in this document stores private-key bytes in registry records. Private keys remain in local, secure, or hardware-backed key stores. Registry records may identify public keys or refer to local key-management and recovery processes, but they must not publish secret key material.
-- **Recovery and rotation:** Passkeys, guardian recovery, one-time recovery material, and 2-of-3 signer-set replacement are researched designs requiring future validator and protocol work; they are not current identity-service capabilities. See [`identity-recovery-research.md`](../research/identity-recovery-research.md) and [`2-of-3-multisig-key-recovery.md`](../research/2-of-3-multisig-key-recovery.md).
+- **Recovery and rotation:** Passkeys, guardian recovery, and one-time recovery material remain researched designs requiring future recovery policy work. The local 2-of-3 bundle and state-transition validators are code-backed, but production identity-service integration is not current. See [`identity-recovery-research.md`](../research/identity-recovery-research.md) and [`2-of-3-multisig-key-recovery.md`](../research/2-of-3-multisig-key-recovery.md).
 
 ### Storage service
 
@@ -72,7 +72,7 @@ These value statements describe intended capabilities and do not guarantee avail
 
 - Cite implemented claims with repository paths and preserve the distinction between the registry and proposed companion services.
 - Label identity, storage, and social conventions as proposed unless implementation evidence exists.
-- Label recovery and multisignature research as researched but unimplemented.
+- Label recovery and production multisignature integration as researched but unimplemented; cite local bundle and validator APIs as code-backed where relevant.
 - State the private-key boundary in every identity-oriented document: only public verification material belongs in registry records.
 - State relevant limitations alongside claims rather than hiding them in a distant disclaimer.
 - Reuse the canonical protocol, setup, configuration, and put/get guides instead of duplicating their operational content.

@@ -229,7 +229,7 @@ The following are not implemented interfaces, APIs, or protocols:
 - **Documented or researched but unimplemented:** Recovery conventions, including passkey, guardian, one-time recovery, and 2-of-3 multisignature authorization research in [identity recovery research](research/identity-recovery-research.md) and [2-of-3 multisig research](research/2-of-3-multisig-key-recovery.md).
 - **Proposed design:** General-purpose Storage Services, Social Graphs, messaging, and collaborative services in [Companion services](companion-services.md).
 
-The CLI and Python package do not currently support these surfaces. Do not present pseudocode or research workflows as current commands or APIs.
+The CLI and Registry put/get surfaces do not currently support these production workflows. The Python package now provides local multisignature bundle operations; do not present research workflows or unimplemented CLI/DHT integration as current commands or APIs.
 
 ## 12. Limitations and boundaries
 
