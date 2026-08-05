@@ -8,7 +8,7 @@
 
 This document defines user-facing concepts and boundaries only. It does not define production wire protocols, schemas, endpoints, or implementations for companion services.
 
-The registry is **implemented and code-backed**. Identity, storage, and social services are **proposed designs** that build on registry records where appropriate. Identity recovery and multisignature material cited below is **researched but unimplemented**.
+The registry is **implemented and code-backed**. Identity, storage, and social services are **proposed designs** that build on registry records where appropriate. Identity recovery and production multisignature integration material cited below is **researched but unimplemented**; local Python bundle operations are code-backed separately.
 
 ## Service definitions and boundaries
 

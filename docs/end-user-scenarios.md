@@ -157,9 +157,9 @@ Current implementation details are linked to the canonical protocol, setup, conf
 
 **Sovereignty and privacy properties:** A single lost key does not necessarily prevent updates, and collective authorization reduces dependence on one signer. Private-key secrecy remains absolute; only public verification material and signatures are exchanged.
 
-**Current-versus-future status:** The workflow is researched and unimplemented. The current CLI, Python API, and validator do not support multisignature bundles.
+**Current-versus-future status:** The local Python bundle workflow is implemented and code-backed for drafting, local signing, proof merging, and threshold finalization. CLI commands, Registry put/get integration, and DHT submission remain future work.
 
-**Limitations:** Two lost or compromised signers cannot be recovered through ordinary 2-of-3 authorization. Bundle transport, signer identity, canonical format, replay protection, recovery policy, and application tooling require future design and implementation. See [2-of-3 multisig key recovery research](research/2-of-3-multisig-key-recovery.md).
+**Limitations:** Two lost or compromised signers cannot be recovered through ordinary 2-of-3 authorization. CLI transport, recovery policy, application tooling, and production Registry integration require future design and implementation. See [2-of-3 multisig key recovery research](research/2-of-3-multisig-key-recovery.md).
 
 ## 7. Build a cross-domain application
 
