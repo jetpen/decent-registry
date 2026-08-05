@@ -89,6 +89,29 @@ def test_provider_draft_contains_the_complete_provider_payload():
     )
 
 
+def test_provider_bundle_supports_sign_merge_finalize_and_round_trip():
+    keypairs = _keypairs()
+    bundle = draft_provider_bundle(
+        object_hash=OBJECT_HASH,
+        provider_url=PROVIDER_URL,
+        endpoints=["/ip4/127.0.0.1/tcp/9000"],
+        owner_public_key=keypairs[0].public_key.to_bytes(),
+        seq=1,
+        signer_set=_signer_set(keypairs[:3]),
+    )
+
+    complete = merge_proof(
+        merge_proof(bundle, sign_bundle(bundle, keypairs[0].private_key)),
+        sign_bundle(bundle, keypairs[1].private_key),
+    )
+    envelope = finalize_bundle(complete)
+    restored = MultisignatureBundle.from_cbor(envelope)
+
+    assert restored.signed_update_bytes == bundle.signed_update_bytes
+    assert [proof.signer_id for proof in restored.proofs] == ["a", "b"]
+    assert is_canonical_cbor(envelope)
+
+
 def test_sign_accepts_one_member_private_key_and_merge_adds_detached_proof():
     keypairs = _keypairs()
     bundle = _draft_identity(keypairs)
