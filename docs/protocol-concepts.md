@@ -175,10 +175,10 @@ Verification requires canonical CBOR:
 
 ### 6.1) Version-1 multisignature wire schema
 
-This section documents the versioned wire format and codec validation added by
-issue #92. Pure multisignature state-transition validation is implemented by
-issue #93. CLI workflows, DHT integration, and production accepted-state
-installation remain later work.
+This section documents the versioned wire format and codec validation from
+issue #92, state-transition validation from issue #93, and the implemented CLI
+and Registry integration from issues #95 and #96. The complete workflow is
+summarized in [Multisignature Records and Migration](multisignature-records.md).
 
 The legacy envelope remains exactly:
 
@@ -266,9 +266,12 @@ put/get and durable accepted-state integration remain follow-up work.
    SignedEnvelope only after the threshold of distinct valid proofs is met.
 
 Bundles may be serialized as canonical versioned envelope-shaped CBOR while
-partial. They are local signing artifacts, not accepted Registry state. CLI
-commands are specified separately by issue #96; Registry put/get integration
-is specified by issue #95.
+partial. They are local signing artifacts, not accepted Registry state. The
+CLI commands are `bundle draft`, `bundle sign`, `bundle merge`, and
+`bundle finalize`. Registry submission uses `put identity` or `put provider`
+with `--finalized-envelope`; `get` validates and exposes authorization
+metadata. See [Multisignature Records and Migration](multisignature-records.md)
+for runnable workflows and the compatibility matrix.
 
 ---
 

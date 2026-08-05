@@ -41,6 +41,7 @@ Conclusion: for any foreseeable number of identity/provider records, SHA-256 key
   - [`docs/single-node-server-setup.md`](docs/single-node-server-setup.md)
   - [`docs/multi-node-cluster-setup.md`](docs/multi-node-cluster-setup.md)
 - Client key generation + configuration: [`docs/client-keygen-cli-config.md`](docs/client-keygen-cli-config.md)
+- Multisignature records and migration: [`docs/multisignature-records.md`](docs/multisignature-records.md)
 - End-to-end examples:
   - [`docs/provider-put-get-examples.md`](docs/provider-put-get-examples.md)
   - [`docs/identity-put-get-examples.md`](docs/identity-put-get-examples.md)
