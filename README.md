@@ -80,7 +80,7 @@ Creates and circulates a local **Multisignature Bundle** without centralizing pr
 - `decent-registry bundle merge --input <bundle> --proof <proof-bundle> --output <merged-bundle>`
 - `decent-registry bundle finalize --input <merged-bundle> --output <signed-envelope>`
 
-`bundle sign` reads one local Ed25519 private-key PEM and emits a detached proof. `bundle merge` verifies proof binding, signer membership, duplicate rejection, and signature validity. `bundle finalize` requires the threshold or explicit legacy-owner upgrade proof rule. Partial bundles are local artifacts and must never be published. See [`docs/multisignature-records.md`](docs/multisignature-records.md) for the complete Identity and Provider workflows, wire format, migration rules, and compatibility matrix.
+`bundle sign` reads one local Ed25519 private-key PEM and emits a detached proof. `bundle merge` verifies proof binding, signer membership, duplicate rejection, and signature validity. `bundle finalize` requires the threshold or explicit legacy-owner upgrade proof rule. Partial bundles are local artifacts and must never be published. Signer replacement and explicit legacy upgrade are documented in [`docs/multisignature-records.md`](docs/multisignature-records.md), which contains the complete Identity and Provider workflows, wire format, migration rules, and compatibility matrix.
 
 ### `put`
 
@@ -100,7 +100,7 @@ Common:
 - `--host`, `--port`, `--bootstrap`
 - `--object-hash <64-hex>`
 
-Legacy mode requires:
+`legacy mode` requires:
 - `--provider-url <url>`
 - `--owner-privkey <owner_privkey_pem_path>`
 - `--seq <monotonic int>`
@@ -125,7 +125,7 @@ decent-registry put provider \
 
 Notes:
 - `--endpoint` values must start with `/` and are normalized/sorted lexicographically before signing.
-- Legacy mode stores a canonical-CBOR legacy SignedEnvelope; finalized mode stores a validated SignedEnvelope. A finalized version-1 multisignature SignedEnvelope is produced by the Bundle workflow.
+- `legacy mode` stores a canonical-CBOR legacy SignedEnvelope; finalized mode stores a validated SignedEnvelope. A finalized version-1 multisignature SignedEnvelope is produced by the Bundle workflow.
 - Verification enforces signature validity, lookup-key binding, Owner Binding, and strictly increasing `Seq` values.
 
 #### `put identity`
@@ -138,7 +138,7 @@ Common:
 - `--host`, `--port`, `--bootstrap`
 - `--owner-name <hex bytes>`
 
-Legacy mode requires:
+`legacy mode` requires:
 - `--owner-privkey <owner_privkey_pem_path>`
 - `--seq <monotonic int>`
 
@@ -157,7 +157,7 @@ decent-registry put identity \
   --seq 1
 ```
 
-Legacy mode creates a legacy SignedEnvelope. Finalized mode uses `--finalized-envelope` and accepts the versioned multisignature SignedEnvelope produced by the Bundle workflow without private-key material.
+`legacy mode` creates a legacy SignedEnvelope. Finalized mode uses `--finalized-envelope` and accepts the versioned multisignature SignedEnvelope produced by the Bundle workflow without private-key material.
 
 ### `get`
 
