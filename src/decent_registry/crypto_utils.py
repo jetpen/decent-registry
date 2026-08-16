@@ -17,6 +17,8 @@ from libp2p.crypto.ed25519 import create_new_key_pair
 
 
 _ED25519_SEED_LENGTH = 32
+_ORIGINAL_OS_CSRNG_TOKEN_BYTES = secrets.token_bytes
+_OS_CSRNG_TOKEN_BYTES = _ORIGINAL_OS_CSRNG_TOKEN_BYTES
 
 
 class KeyGenerationError(ValueError):
@@ -34,7 +36,15 @@ class _SystemCSRNG:
 
     @staticmethod
     def token_bytes(length: int) -> bytes:
-        return secrets.token_bytes(length)
+        if (
+            _OS_CSRNG_TOKEN_BYTES is not _ORIGINAL_OS_CSRNG_TOKEN_BYTES
+            or secrets.token_bytes is not _ORIGINAL_OS_CSRNG_TOKEN_BYTES
+        ):
+            raise KeyGenerationError("secure randomness provider is unavailable")
+        # Bind the approved OS-backed callable at import time. Replacing the
+        # public secrets module attribute later cannot silently change this
+        # security boundary to a general-purpose PRNG.
+        return _OS_CSRNG_TOKEN_BYTES(length)
 
 
 _SYSTEM_CSRNG_PROVIDER = _SystemCSRNG()
@@ -47,13 +57,26 @@ def _is_system_csrng_provider(provider: object) -> bool:
     )
 
 
-def _secure_ed25519_seed() -> bytes:
-    provider = _SYSTEM_CSRNG_PROVIDER
-    if not _is_system_csrng_provider(provider):
+def _secure_ed25519_seed(*, provider: Any | None = None) -> bytes:
+    """Acquire one Ed25519 seed; ``provider`` is a private test-only seam.
+
+    Production callers omit ``provider`` and therefore use the exact
+    import-time-bound system provider. Explicit provider injection exists only
+    so deterministic tests can exercise provider failures and malformed
+    entropy without changing production wiring.
+    """
+
+    if provider is None:
+        provider = _SYSTEM_CSRNG_PROVIDER
+        if not _is_system_csrng_provider(provider):
+            raise KeyGenerationError("secure randomness provider is unavailable")
+
+    token_bytes = getattr(provider, "token_bytes", None)
+    if not callable(token_bytes):
         raise KeyGenerationError("secure randomness provider is unavailable")
 
     try:
-        seed = provider.token_bytes(_ED25519_SEED_LENGTH)
+        seed = token_bytes(_ED25519_SEED_LENGTH)
     except Exception:
         raise KeyGenerationError("secure randomness provider failed") from None
 
@@ -62,18 +85,22 @@ def _secure_ed25519_seed() -> bytes:
     return seed
 
 
-def generate_ed25519_private_key() -> Ed25519PrivateKey:
+def generate_ed25519_private_key(*, _provider: Any | None = None) -> Ed25519PrivateKey:
     """Generate an Ed25519 key using only the OS-backed CSRNG boundary."""
 
     try:
-        return Ed25519PrivateKey.from_private_bytes(_secure_ed25519_seed())
+        return Ed25519PrivateKey.from_private_bytes(
+            _secure_ed25519_seed(provider=_provider)
+        )
     except KeyGenerationError:
         raise
     except Exception:
         raise KeyGenerationError("secure key generation failed") from None
 
 
-def write_ed25519_private_key_pem(output_path: str | os.PathLike[str]) -> None:
+def write_ed25519_private_key_pem(
+    output_path: str | os.PathLike[str], *, _provider: Any | None = None
+) -> None:
     """Create a restrictive, unencrypted PKCS#8 PEM key without overwriting.
 
     Entropy is acquired and the PEM is serialized before the output path is
@@ -84,7 +111,7 @@ def write_ed25519_private_key_pem(output_path: str | os.PathLike[str]) -> None:
 
     path = Path(output_path)
     try:
-        private_key = generate_ed25519_private_key()
+        private_key = generate_ed25519_private_key(_provider=_provider)
         pem_bytes = private_key.private_bytes(
             Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()
         )

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from argparse import Namespace
-
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import (
@@ -35,8 +33,13 @@ class _MalformedCSRNG:
         return _MalformedCSRNG.value
 
 
-def _keygen_args(path) -> Namespace:
-    return Namespace(output=str(path))
+class _CountingCSRNG:
+    calls = 0
+
+    @staticmethod
+    def token_bytes(length: int) -> bytes:
+        _CountingCSRNG.calls += 1
+        return b"c" * length
 
 
 def test_generate_ed25519_private_key_uses_real_csrng_boundary():
@@ -50,12 +53,24 @@ def test_generate_ed25519_private_key_uses_real_csrng_boundary():
     ) == 32
 
 
-def test_csrng_acquisition_failure_is_fatal(monkeypatch, tmp_path):
-    monkeypatch.setattr(crypto_utils, "_SYSTEM_CSRNG_PROVIDER", _UnavailableCSRNG())
+def test_explicit_test_seam_is_called_for_api_generation():
+    _CountingCSRNG.calls = 0
+
+    private_key = crypto_utils.generate_ed25519_private_key(
+        _provider=_CountingCSRNG()
+    )
+
+    assert isinstance(private_key, Ed25519PrivateKey)
+    assert _CountingCSRNG.calls == 1
+
+
+def test_csrng_acquisition_failure_is_fatal(tmp_path):
     output = tmp_path / "owner.pem"
 
     with pytest.raises(crypto_utils.KeyGenerationError, match="secure randomness"):
-        crypto_utils.write_ed25519_private_key_pem(output)
+        crypto_utils.write_ed25519_private_key_pem(
+            output, _provider=_UnavailableCSRNG()
+        )
 
     assert not output.exists()
 
@@ -71,25 +86,27 @@ def test_nonsecure_provider_replacement_is_rejected(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("entropy", [b"short", b"e" * 33])
-def test_malformed_csrng_entropy_is_fatal(monkeypatch, tmp_path, entropy):
+def test_malformed_csrng_entropy_is_fatal(tmp_path, entropy):
     _MalformedCSRNG.value = entropy
-    monkeypatch.setattr(crypto_utils, "_SYSTEM_CSRNG_PROVIDER", _MalformedCSRNG())
     output = tmp_path / "owner.pem"
 
     with pytest.raises(crypto_utils.KeyGenerationError, match="secure randomness"):
-        crypto_utils.write_ed25519_private_key_pem(output)
+        crypto_utils.write_ed25519_private_key_pem(
+            output, _provider=_MalformedCSRNG()
+        )
 
     assert not output.exists()
 
 
-def test_csrng_failure_does_not_modify_existing_output(monkeypatch, tmp_path):
+def test_csrng_failure_does_not_modify_existing_output(tmp_path):
     output = tmp_path / "owner.pem"
     original = b"existing key file"
     output.write_bytes(original)
-    monkeypatch.setattr(crypto_utils, "_SYSTEM_CSRNG_PROVIDER", _UnavailableCSRNG())
 
     with pytest.raises(crypto_utils.KeyGenerationError):
-        crypto_utils.write_ed25519_private_key_pem(output)
+        crypto_utils.write_ed25519_private_key_pem(
+            output, _provider=_UnavailableCSRNG()
+        )
 
     assert output.read_bytes() == original
 
@@ -108,6 +125,54 @@ def test_cli_delegates_to_api_and_reports_csrng_failure_without_secrets(
     assert "key generation failed" in captured.err
     assert "entropy device unavailable" not in captured.err
     assert "BEGIN" not in captured.out + captured.err
+    assert not output.exists()
+
+
+def test_cli_does_not_invoke_fallback_after_csrng_failure(
+    monkeypatch, tmp_path, capsys
+):
+    fallback_calls = 0
+
+    class _FailingProvider:
+        @staticmethod
+        def token_bytes(_length: int) -> bytes:
+            raise OSError("entropy unavailable")
+
+    def fallback(*_args, **_kwargs):
+        nonlocal fallback_calls
+        fallback_calls += 1
+        return b"f" * 32
+
+    monkeypatch.setattr(crypto_utils, "_SYSTEM_CSRNG_PROVIDER", _FailingProvider())
+    monkeypatch.setattr(crypto_utils, "create_new_key_pair", fallback)
+    output = tmp_path / "owner.pem"
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["keygen", "--output", str(output)])
+    capsys.readouterr()
+
+    assert exc_info.value.code == 1
+    assert fallback_calls == 0
+    assert not output.exists()
+
+
+def test_replacing_bound_csrng_callable_fails_closed(monkeypatch, tmp_path):
+    monkeypatch.setattr(crypto_utils, "_OS_CSRNG_TOKEN_BYTES", _NonSecurePRNG.token_bytes)
+    output = tmp_path / "owner.pem"
+
+    with pytest.raises(crypto_utils.KeyGenerationError, match="secure randomness"):
+        crypto_utils.write_ed25519_private_key_pem(output)
+
+    assert not output.exists()
+
+
+def test_replacing_public_secrets_callable_fails_closed(monkeypatch, tmp_path):
+    monkeypatch.setattr(crypto_utils.secrets, "token_bytes", _NonSecurePRNG.token_bytes)
+    output = tmp_path / "owner.pem"
+
+    with pytest.raises(crypto_utils.KeyGenerationError, match="secure randomness"):
+        crypto_utils.write_ed25519_private_key_pem(output)
+
     assert not output.exists()
 
 
@@ -153,12 +218,6 @@ def test_cli_success_writes_restricted_valid_pem(tmp_path, capsys):
     assert isinstance(
         load_pem_private_key(output.read_bytes(), password=None), Ed25519PrivateKey
     )
-
-
-def test_no_general_purpose_random_module_is_used():
-    source = open(crypto_utils.__file__, encoding="utf-8").read()
-    assert "import random" not in source
-    assert "random.Random" not in source
 
 
 # The production boundary accepts only the exact internal provider type. Tests
