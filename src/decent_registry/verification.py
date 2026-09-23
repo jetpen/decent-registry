@@ -790,16 +790,39 @@ def validate_multisignature_upgrade(
     )
 
 
+def _validate_owner_rotation_invariants(
+    *,
+    record_key: bytes,
+    candidate_record_fields: dict[int, Any],
+    candidate_record_key: bytes,
+    candidate_seq: int,
+    authorization: dict[int, Any],
+    predecessor_record_fields: dict[int, Any],
+    predecessor_record_key: bytes,
+    predecessor_seq: int,
+    predecessor_state_hash: bytes,
+) -> None:
+    if authorization[3] != OPERATION_OWNER_KEY_ROTATION:
+        raise ValueError("expected owner-key-rotation operation")
+    if authorization[2] != RECORD_KIND_IDENTITY:
+        raise ValueError("owner-key rotation requires an Identity Record")
+    if bytes(candidate_record_fields[1]) != bytes(predecessor_record_fields[1]):
+        raise ValueError("owner_name bytes mismatch")
+    if bytes(candidate_record_fields[2]) == bytes(predecessor_record_fields[2]):
+        raise ValueError("Owner Public Key must change during rotation")
+    if candidate_record_key != record_key or predecessor_record_key != record_key:
+        raise ValueError("lookup-key mismatch")
+    if candidate_seq != predecessor_seq + 1:
+        raise ValueError("rotation seq must be exactly predecessor seq plus one")
+    if authorization[7] != predecessor_state_hash:
+        raise ValueError("predecessor state mismatch")
+
+
 def _validate_owner_rotation_from_legacy(
     *, record_key: bytes, envelope_cbor: bytes, legacy_envelope_cbor: bytes
 ) -> MultisignatureState:
     parsed = _decode_multisignature_candidate(envelope_cbor)
     authorization = parsed[7]
-    if authorization[3] != OPERATION_OWNER_KEY_ROTATION:
-        raise ValueError("expected owner-key-rotation operation")
-    if authorization[2] != RECORD_KIND_IDENTITY:
-        raise ValueError("owner-key rotation requires an Identity Record")
-
     (
         legacy_signed_update,
         legacy_record_fields,
@@ -816,15 +839,17 @@ def _validate_owner_rotation_from_legacy(
     if set(legacy_record_fields) != {1, 2} or legacy_payload:
         raise ValueError("legacy predecessor is not an Identity Record")
 
-    owner_name = bytes(parsed[3][1])
-    if owner_name != bytes(legacy_record_fields[1]):
-        raise ValueError("owner_name bytes mismatch")
-    if parsed[6] != record_key:
-        raise ValueError("lookup-key mismatch")
-    if parsed[5] != legacy_seq + 1:
-        raise ValueError("rotation seq must be exactly predecessor seq plus one")
-    if authorization[7] != _sha256(legacy_signed_update):
-        raise ValueError("predecessor state mismatch")
+    _validate_owner_rotation_invariants(
+        record_key=record_key,
+        candidate_record_fields=parsed[3],
+        candidate_record_key=parsed[6],
+        candidate_seq=parsed[5],
+        authorization=authorization,
+        predecessor_record_fields=legacy_record_fields,
+        predecessor_record_key=record_key,
+        predecessor_seq=legacy_seq,
+        predecessor_state_hash=_sha256(legacy_signed_update),
+    )
     if authorization[4] != 1:
         raise ValueError("legacy owner rotation epoch must be 1")
     _require_complete_2_of_3(authorization)
@@ -886,22 +911,20 @@ def _validate_owner_rotation_from_state(
 
     parsed = _decode_multisignature_candidate(envelope_cbor)
     authorization = parsed[7]
-    if authorization[3] != OPERATION_OWNER_KEY_ROTATION:
-        raise ValueError("expected owner-key-rotation operation")
-    if authorization[2] != RECORD_KIND_IDENTITY:
-        raise ValueError("owner-key rotation requires an Identity Record")
-
     predecessor = decode_multisignature_signed_update(
         current_state.signed_update_bytes
     )
-    if bytes(parsed[3][1]) != bytes(predecessor[1][1]):
-        raise ValueError("owner_name bytes mismatch")
-    if parsed[6] != record_key or current_state.record_key != record_key:
-        raise ValueError("lookup-key mismatch")
-    if parsed[5] != current_state.seq + 1:
-        raise ValueError("rotation seq must be exactly predecessor seq plus one")
-    if authorization[7] != current_state.state_hash:
-        raise ValueError("predecessor state mismatch")
+    _validate_owner_rotation_invariants(
+        record_key=record_key,
+        candidate_record_fields=parsed[3],
+        candidate_record_key=parsed[6],
+        candidate_seq=parsed[5],
+        authorization=authorization,
+        predecessor_record_fields=predecessor[1],
+        predecessor_record_key=current_state.record_key,
+        predecessor_seq=current_state.seq,
+        predecessor_state_hash=current_state.state_hash,
+    )
     if authorization[4] != current_state.epoch:
         raise ValueError("rotation epoch must preserve the predecessor epoch")
     if authorization[5] != current_state.threshold:

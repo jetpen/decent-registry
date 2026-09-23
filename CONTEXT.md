@@ -22,6 +22,9 @@ _Avoid_: Username, account name
 **Owner Public Key**: The Ed25519 public key bytes that the registry uses to verify signatures for a record key (and to enforce owner-binding on overwrite).
 _Avoid_: Identity key, public address
 
+**Owner-Key Rotation**: An Identity Record transition that changes its Owner Public Key while retaining the same Owner Name, Object Key, and authenticated predecessor lineage.
+_Avoid_: Key rollover, owner-key replacement
+
 **Object Key**: The DHT lookup key for an Identity Record derived from the owner name bytes.
 _Avoid_: Identifier
 

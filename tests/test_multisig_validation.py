@@ -666,6 +666,26 @@ def test_owner_rotation_from_verified_legacy_identity_uses_null_owner_proof():
     assert state.history == (legacy, envelope)
 
 
+def test_legacy_owner_rotation_rejects_unchanged_owner_public_key():
+    keypairs = _keypairs()
+    legacy, legacy_update = _legacy_identity_envelope(keypairs[0])
+    record_key = hashlib.sha256(OWNER_NAME).digest()
+    signer_set = _signer_set(keypairs[:3])
+    update = _rotation_update(
+        owner_public_key=keypairs[0].public_key.to_bytes(),
+        seq=5,
+        predecessor_state_hash=hashlib.sha256(legacy_update).digest(),
+        signer_set=signer_set,
+    )
+
+    with pytest.raises(ValueError, match="Owner Public Key must change"):
+        validate_multisignature_update(
+            record_key=record_key,
+            envelope_cbor=_envelope(update, [_proof(None, keypairs[0], update)]),
+            legacy_envelope_cbor=legacy,
+        )
+
+
 def test_owner_rotation_from_version_one_uses_predecessor_signer_set():
     keypairs = _keypairs()
     legacy, legacy_update = _legacy_identity_envelope(keypairs[0])
@@ -717,6 +737,44 @@ def test_owner_rotation_from_version_one_uses_predecessor_signer_set():
         validate_multisignature_update(
             record_key=record_key,
             envelope_cbor=forged,
+            current_state=current_state,
+        )
+
+
+def test_version_one_owner_rotation_rejects_unchanged_owner_public_key():
+    keypairs = _keypairs()
+    legacy, legacy_update = _legacy_identity_envelope(keypairs[0])
+    record_key = hashlib.sha256(OWNER_NAME).digest()
+    signer_set = _signer_set(keypairs[:3])
+    upgrade = _identity_update(
+        owner_public_key=keypairs[0].public_key.to_bytes(),
+        seq=5,
+        authorization=_authorization(
+            record_kind=RECORD_KIND_IDENTITY,
+            operation=OPERATION_UPGRADE,
+            epoch=1,
+            predecessor_state_hash=hashlib.sha256(legacy_update).digest(),
+            signer_set=signer_set,
+        ),
+    )
+    current_state = validate_multisignature_update(
+        record_key=record_key,
+        envelope_cbor=_envelope(upgrade, [_proof("a", keypairs[0], upgrade)]),
+        legacy_envelope_cbor=legacy,
+    )
+    update = _rotation_update(
+        owner_public_key=keypairs[0].public_key.to_bytes(),
+        seq=6,
+        predecessor_state_hash=current_state.state_hash,
+        signer_set=signer_set,
+    )
+
+    with pytest.raises(ValueError, match="Owner Public Key must change"):
+        validate_multisignature_update(
+            record_key=record_key,
+            envelope_cbor=_envelope(
+                update, [_proof("a", keypairs[0], update), _proof("b", keypairs[1], update)]
+            ),
             current_state=current_state,
         )
 
