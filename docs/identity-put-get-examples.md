@@ -156,7 +156,8 @@ These fields come from the decoded/validated identity update in `src/decent_regi
 For a fixed identity DHT key, overwrite is accepted only if:
 
 - `seq` is strictly increasing (strict monotonicity)
-- the `owner_public_key` stays identical across updates (owner collision is rejected)
+- for the legacy single-key flow shown here, the `owner_public_key` stays identical across overwrites (owner collision is rejected)
+- a version-1 Identity owner-key change is allowed only through validated operation-5 Owner-Key Rotation with complete authenticated predecessor history; all other Identity operations preserve the Owner Public Key. See [Multisignature Records and Migration](multisignature-records.md).
 - the update is canonical and signature-valid
 
 Concretely:

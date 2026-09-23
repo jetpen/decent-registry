@@ -276,7 +276,7 @@ The Registry integration should remain narrow:
 - sign the existing canonical SignedUpdate/SignedEnvelope format;
 - publish no seed phrase, passphrase, derivation private key, chain code, or wallet backup metadata.
 
-The current Identity Record validation binds a record key to an Owner Public Key and requires strictly increasing `Seq`; see [`src/decent_registry/verification.py`](../../src/decent_registry/verification.py) and [`CONTEXT.md`](../../CONTEXT.md). Seed restoration does not alter those rules. If the project later supports lost-key recovery or owner-key rotation, it must use a separately specified Recovery Policy or Signer Set transition. The existing research on recovery and multisignature replacement covers those protocol implications:
+Identity updates require strictly increasing `Seq` and preserve the current Owner Public Key except for validated Registry operation-5 Owner-Key Rotation; see [`src/decent_registry/verification.py`](../../src/decent_registry/verification.py), [`CONTEXT.md`](../../CONTEXT.md), and [Multisignature Records and Migration](../multisignature-records.md). Seed restoration does not alter those rules. Operation 5 requires the existing legacy-owner proof or version-1 Signer Set threshold; separate lost-key recovery remains unimplemented and requires its own Recovery Policy. The existing research on recovery and multisignature replacement covers those protocol implications:
 
 - [`identity-recovery-research.md`](identity-recovery-research.md)
 - [`2-of-3-multisig-key-recovery.md`](2-of-3-multisig-key-recovery.md)

@@ -15,7 +15,8 @@ The following behavior is **implemented and code-backed**:
 - finalized-envelope `put` for both record families;
 - multisignature `get` output with authorization metadata;
 - legacy single-key compatibility before upgrade and rejection of legacy writes after upgrade;
-- signer replacement, ordinary updates, strict `Seq` ordering, predecessor-state binding, and lookup-key binding.
+- signer replacement, ordinary updates, Identity owner-key rotation (operation 5), strict `Seq` ordering, predecessor-state binding, and lookup-key binding.
+- replay of locally retained Identity predecessor history before accepting or resolving operation-5 state; missing or incomplete provenance fails closed.
 
 The following claim classes are not current Registry behavior:
 
@@ -89,7 +90,8 @@ authorization = {
   1: 1,                         # explicit independent Ed25519 scheme
   2: record_kind,               # 1 = Identity Record, 2 = Provider Record
   3: operation,                 # 1 genesis, 2 ordinary update,
-                                # 3 replace signers, 4 upgrade
+                                # 3 replace signers, 4 upgrade,
+                                # 5 owner-key rotation
   4: epoch,
   5: threshold,
   6: [ { 1: signer_id, 2: public_key }, ... ],
@@ -97,7 +99,7 @@ authorization = {
 }
 ```
 
-Signer identifiers are non-empty UTF-8 text. Public keys are 32-byte Ed25519 public keys. Proof signatures are 64-byte Ed25519 signatures. The signer set and proof collection are ordered by the UTF-8 bytes of `signer_id` before canonical encoding.
+Signer identifiers in Signer Sets are non-empty UTF-8 text. Public keys are 32-byte Ed25519 public keys. Proof signatures are 64-byte Ed25519 signatures. Proofs are ordered by the UTF-8 bytes of `signer_id`; operation 5's single legacy-owner proof uses `signer_id: null`, whose canonical sort key is empty bytes. Null is accepted only for a verified legacy Identity predecessor under operation 5.
 
 The codecs reject non-canonical CBOR, wrong map shapes, unsupported envelope versions, unsupported authorization schemes, duplicate signer identifiers, duplicate public keys, malformed keys, malformed signatures, invalid thresholds, and non-canonical proof ordering. The transition validator additionally checks proof membership, signatures, thresholds, `Seq`, epochs, predecessor state, record-key binding, wrong record kinds, and operation-specific rules.
 
@@ -144,11 +146,15 @@ Every accepted multisignature state is bound to one record lookup key.
 | `ordinary-update` | Threshold proofs from the current Signer Set | `Seq` strictly increases; epoch, threshold, and Signer Set remain unchanged; predecessor binds the current state hash. |
 | `replace-signers` | Threshold proofs from the current Signer Set | `Seq` strictly increases; epoch increases; a new complete 2-of-3 Signer Set is installed; the new set cannot authorize its own installation. |
 | `upgrade` | Exactly one valid proof from the legacy Owner Public Key | The legacy state must exist; lookup key, record kind, Owner Binding, and predecessor hash must match; `Seq` strictly increases; `epoch = 1`; the new state contains a complete 2-of-3 Signer Set. |
+| `owner-key-rotation` (Identity only) | Exactly one predecessor-owner proof for a legacy predecessor, or the predecessor version-1 threshold | The Owner Public Key must change; `Seq = predecessor.seq + 1`; raw Owner Name bytes, record kind, Object Key, and predecessor hash match. A legacy rotation installs epoch 1, threshold 2, and three distinct successor signers including the successor Owner Public Key. A version-1 rotation preserves its Signer Set, threshold, and epoch. |
 
-A finalized ordinary or replacement update requires at least `threshold` distinct valid proofs. An upgrade is intentionally different: it requires exactly one proof from the legacy owner, not the new threshold. After a multisignature state is accepted, a legacy single-key write is rejected for that record key.
+A finalized ordinary or replacement update requires at least `threshold` distinct valid proofs. An upgrade is intentionally different: it requires exactly one proof from the legacy owner, not the new threshold. A legacy operation-5 rotation also requires exactly one proof from the legacy Owner Public Key, but its `signer_id` is null and the successor Owner Public Key must belong to the new 2-of-3 set. A version-1 operation-5 rotation is authorized by the predecessor Signer Set and does not require the successor Owner Public Key to be in that unchanged set. Every operation other than operation 5 preserves Owner Public Key. After a multisignature state is accepted, a legacy single-key write is rejected for that record key.
 
-The transition rules apply equally to Identity Records and Provider Records. The record kind in authorization key `2` must match the SignedUpdate structure and the DHT namespace.
+Operation-5 validation replays the complete locally retained predecessor envelope chain from its signed legacy anchor. The chain is written atomically with the accepted Identity state in LMDB. A standalone non-genesis Identity envelope, missing history, a history that does not end at the current envelope, or any invalid ancestor is rejected; `get` returns no Identity Record when provenance cannot be verified. This history is local accepted-state metadata, not a change to the DHT envelope format.
 
+Registry operation-5 acceptance is only the public-record validation and storage prerequisite. It does not implement wallet key generation or private-key handling, user consent, dispatch latching, publication confirmation, successor-key promotion, or independent remote read-back. Wallet issue #18 remains open; successful Registry acceptance alone is not wallet confirmation.
+
+Operations 1–4 apply to Identity Records and Provider Records. Operation 5 is Identity-only. The record kind in authorization key `2` must match the SignedUpdate structure and the DHT namespace.
 ## 4. Local Multisignature Bundle workflow
 
 A Multisignature Bundle is a local signing artifact. It contains one canonical SignedUpdate and zero or more detached proofs. Partial bundles are never valid Registry state and must never be submitted with `put`.
@@ -660,7 +666,7 @@ This is compatibility at the record and CLI boundary, not a promise that an old 
 
 ## 7. Security boundaries
 
-- Private keys remain local or hardware-backed. The CLI accepts file paths and never places private-key bytes in a bundle or Registry value.
+- Private keys remain local or hardware-backed. The CLI accepts file paths and never places private-key bytes in a bundle or Registry value. Registry operation-5 code does not accept, store, log, or return wallet private-key material; it handles only public records, signatures, and public predecessor envelopes.
 - Signers exchange detached proofs, not private keys.
 - Every proof is bound to the exact canonical SignedUpdate bytes.
 - `merge` verifies signer membership and the Ed25519 signature before adding a proof.

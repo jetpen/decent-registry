@@ -23,6 +23,13 @@ class StorageBackend(Protocol):
         key: bytes,
     ) -> bytes | None: ...
 
+    def get_history(
+        self,
+        *,
+        kind: Literal["provider", "identity"],
+        key: bytes,
+    ) -> tuple[bytes, ...] | None: ...
+
     def put_if_newer(
         self,
         *,
@@ -31,4 +38,5 @@ class StorageBackend(Protocol):
         value: bytes,
         seq: int,
         state_hash: bytes,
+        history: tuple[bytes, ...] | None = None,
     ) -> bool: ...

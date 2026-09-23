@@ -6,16 +6,22 @@ from typing import Any
 import cbor2
 
 from decent_registry.encoding import (
+    OPERATION_OWNER_KEY_ROTATION,
+    RECORD_KIND_IDENTITY,
     decode_canonical_signed_update,
     decode_multisignature_signed_update,
 )
 from decent_registry.provider_schema import ProviderPayloadV1, decode_provider_payload_dict
-from decent_registry.signed_envelope import decode_signed_envelope
+from decent_registry.signed_envelope import (
+    decode_multisignature_envelope,
+    decode_signed_envelope,
+)
 from decent_registry.verification import (
     MultisignatureState,
     SeqStateEntry,
     validate_identity_update,
     validate_multisignature_envelope,
+    validate_multisignature_history,
     validate_multisignature_update,
     validate_provider_update,
     validate_signed_update_overwrite,
@@ -200,20 +206,59 @@ class RecordValidator:
             return None
 
     @staticmethod
+    def _require_history_ending_at(
+        *,
+        predecessor_chain: tuple[bytes, ...] | None,
+        envelope_cbor: bytes,
+        state_label: str,
+    ) -> None:
+        if not predecessor_chain or predecessor_chain[-1] != envelope_cbor:
+            raise ValueError(
+                f"predecessor history does not end at {state_label}"
+            )
+
+    @staticmethod
     def _validate_multisignature_transition(
         *,
         record_key: bytes,
         envelope_cbor: bytes,
         existing_envelope_cbor: bytes | None,
+        predecessor_chain: tuple[bytes, ...] | None = None,
     ) -> MultisignatureState:
         current_state: MultisignatureState | None = None
         legacy_envelope_cbor: bytes | None = None
+        candidate = decode_multisignature_envelope(envelope_cbor)
+        candidate_update = decode_multisignature_signed_update(
+            candidate.signed_update_bytes
+        )
+        candidate_operation = candidate_update[4][3]
+        candidate_record_kind = candidate_update[4][2]
         if existing_envelope_cbor is not None:
             if _is_multisignature_envelope(existing_envelope_cbor):
-                current_state = validate_multisignature_envelope(
-                    record_key=record_key,
-                    envelope_cbor=existing_envelope_cbor,
-                )
+                if predecessor_chain is not None:
+                    RecordValidator._require_history_ending_at(
+                        predecessor_chain=predecessor_chain,
+                        envelope_cbor=existing_envelope_cbor,
+                        state_label="current state",
+                    )
+                    current_state = validate_multisignature_history(
+                        record_key=record_key,
+                        envelopes=predecessor_chain,
+                    )
+                elif candidate_operation == OPERATION_OWNER_KEY_ROTATION:
+                    raise ValueError("complete predecessor history is required for owner rotation")
+                else:
+                    current_state = validate_multisignature_envelope(
+                        record_key=record_key,
+                        envelope_cbor=existing_envelope_cbor,
+                    )
+                    if (
+                        candidate_record_kind == RECORD_KIND_IDENTITY
+                        and current_state.history is None
+                    ):
+                        raise ValueError(
+                            "complete predecessor history is required for Identity state"
+                        )
             else:
                 legacy_envelope_cbor = existing_envelope_cbor
         return validate_multisignature_update(
@@ -303,12 +348,14 @@ class RecordValidator:
         record_key: bytes,
         envelope_cbor: bytes,
         existing_envelope_cbor: bytes | None = None,
+        predecessor_chain: tuple[bytes, ...] | None = None,
     ) -> IdentityOverwriteResult:
         if _is_multisignature_envelope(envelope_cbor):
             state = self._validate_multisignature_transition(
                 record_key=record_key,
                 envelope_cbor=envelope_cbor,
                 existing_envelope_cbor=existing_envelope_cbor,
+                predecessor_chain=predecessor_chain,
             )
             signed_update = decode_multisignature_signed_update(
                 state.signed_update_bytes
@@ -407,12 +454,30 @@ class RecordValidator:
         *,
         record_key: bytes,
         envelope_cbor: bytes,
+        predecessor_chain: tuple[bytes, ...] | None = None,
     ) -> IdentityOverwriteResult | IdentityRecordResult:
         if _is_multisignature_envelope(envelope_cbor):
-            state = validate_multisignature_envelope(
-                record_key=record_key,
-                envelope_cbor=envelope_cbor,
-            )
+            if predecessor_chain is not None:
+                self._require_history_ending_at(
+                    predecessor_chain=predecessor_chain,
+                    envelope_cbor=envelope_cbor,
+                    state_label="accepted state",
+                )
+                state = validate_multisignature_history(
+                    record_key=record_key,
+                    envelopes=predecessor_chain,
+                )
+            else:
+                state = validate_multisignature_envelope(
+                    record_key=record_key,
+                    envelope_cbor=envelope_cbor,
+                )
+            if state.record_kind != RECORD_KIND_IDENTITY:
+                raise ValueError("expected an Identity Record")
+            if state.history is None:
+                raise ValueError(
+                    "complete predecessor history is required for Identity state"
+                )
             signed_update = decode_multisignature_signed_update(
                 state.signed_update_bytes
             )

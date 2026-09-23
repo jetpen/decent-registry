@@ -14,6 +14,7 @@ from libp2p.kad_dht.kad_dht import KadDHT, DHTMode
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.tools.anyio_service.context import background_trio_service
 
+from decent_registry.encoding import OPERATION_OWNER_KEY_ROTATION
 from decent_registry.storage_backend import StorageBackend
 from decent_registry.provider_schema import ProviderPayloadV1
 from decent_registry.record_validator import (
@@ -217,9 +218,59 @@ class Libp2pKadDHT:
             return None
         return self._durable_store.get(kind=kind, key=key)  # type: ignore[arg-type]
 
+    def _durable_history(
+        self, *, kind: str, key: bytes
+    ) -> tuple[bytes, ...] | None:
+        if self._durable_store is None:
+            return None
+        get_history = getattr(self._durable_store, "get_history", None)
+        if get_history is None:
+            return None
+        return get_history(kind=kind, key=key)  # type: ignore[arg-type]
+
+    @staticmethod
+    def _history_ending_at(
+        history: tuple[bytes, ...] | None, value: bytes | None
+    ) -> tuple[bytes, ...] | None:
+        if history and value is not None and history[-1] == value:
+            return history
+        return None
+
+    @staticmethod
+    def _accepted_state_put_kwargs(
+        *,
+        kind: str,
+        key: bytes,
+        value: bytes,
+        seq: int,
+        state_hash: bytes,
+        history: tuple[bytes, ...] | None = None,
+    ) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "kind": kind,
+            "key": key,
+            "value": value,
+            "seq": seq,
+            "state_hash": state_hash,
+        }
+        if kind == "identity":
+            kwargs["history"] = history
+        return kwargs
+
     def _durable_install(
         self, *, kind: str, key: bytes, value: bytes, result: Any
     ) -> None:
+        if (
+            kind == "identity"
+            and getattr(getattr(result, "authorization", None), "operation", None)
+            == OPERATION_OWNER_KEY_ROTATION
+            and (
+                self._durable_store is None
+                or getattr(self._durable_store, "get_history", None) is None
+                or getattr(self._durable_store, "put_if_newer", None) is None
+            )
+        ):
+            raise ValueError("owner-key rotation requires durable predecessor history")
         if self._durable_store is None:
             return
         seq, state_hash = _result_seq_and_state_hash(result, value)
@@ -227,17 +278,26 @@ class Libp2pKadDHT:
         if put_if_newer is None:
             self._durable_store.put(kind=kind, key=key, value=value)  # type: ignore[arg-type]
             return
-        if not put_if_newer(
+        state = getattr(result, "state", None)
+        kwargs = self._accepted_state_put_kwargs(
             kind=kind,
             key=key,
             value=value,
             seq=seq,
             state_hash=state_hash,
-        ):
+            history=getattr(state, "history", None),
+        )
+        if not put_if_newer(**kwargs):
             raise ValueError("stale or conflicting accepted state")
 
     def _durable_cache(
-        self, *, kind: str, key: bytes, value: bytes, result: Any
+        self,
+        *,
+        kind: str,
+        key: bytes,
+        value: bytes,
+        result: Any,
+        history: tuple[bytes, ...] | None = None,
     ) -> None:
         if self._durable_store is None:
             return
@@ -246,13 +306,15 @@ class Libp2pKadDHT:
         if put_if_newer is None:
             self._durable_store.put(kind=kind, key=key, value=value)  # type: ignore[arg-type]
             return
-        put_if_newer(
+        kwargs = self._accepted_state_put_kwargs(
             kind=kind,
             key=key,
             value=value,
             seq=seq,
             state_hash=state_hash,
+            history=history,
         )
+        put_if_newer(**kwargs)
 
     async def _read_dht_value(self, kad_key: str, *, quorum: int = 0) -> bytes | None:
         try:
@@ -327,10 +389,15 @@ class Libp2pKadDHT:
                 return
 
             raw_existing = _select_newest_envelope(raw_dht, raw_local)
+            predecessor_chain = self._history_ending_at(
+                self._durable_history(kind="identity", key=record_key),
+                raw_existing,
+            )
             result = self._validator.validate_identity_overwrite(
                 record_key=record_key,
                 envelope_cbor=envelope_cbor,
                 existing_envelope_cbor=raw_existing,
+                predecessor_chain=predecessor_chain,
             )
             if _is_multisignature_envelope(envelope_cbor):
                 self._durable_install(
@@ -351,9 +418,15 @@ class Libp2pKadDHT:
             raw_current = raw_dht if raw_dht is not None else raw_local
         if raw_current is None:
             return None
+        predecessor_chain = self._history_ending_at(
+            self._durable_history(kind="identity", key=record_key),
+            raw_current,
+        )
         try:
             result = self._validator.validate_identity_get(
-                record_key=record_key, envelope_cbor=raw_current
+                record_key=record_key,
+                envelope_cbor=raw_current,
+                predecessor_chain=predecessor_chain,
             )
         except Exception:
             return None
@@ -369,6 +442,7 @@ class Libp2pKadDHT:
         if self._durable_store is not None and raw_current == raw_dht:
             self._durable_cache(
                 kind="identity", key=record_key, value=raw_current, result=result
+                , history=predecessor_chain
             )
         return decoded
 

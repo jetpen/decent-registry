@@ -13,6 +13,7 @@ OPERATION_GENESIS = 1
 OPERATION_ORDINARY_UPDATE = 2
 OPERATION_REPLACE_SIGNERS = 3
 OPERATION_UPGRADE = 4
+OPERATION_OWNER_KEY_ROTATION = 5
 
 _AUTHORIZATION_KEYS = set(range(1, 8))
 _SIGNER_ENTRY_KEYS = {1, 2}
@@ -90,6 +91,7 @@ def validate_authorization_map(
         OPERATION_ORDINARY_UPDATE,
         OPERATION_REPLACE_SIGNERS,
         OPERATION_UPGRADE,
+        OPERATION_OWNER_KEY_ROTATION,
     }:
         raise ValueError(f"unsupported operation: {operation}")
     epoch = _require_uint(authorization[4], name="epoch")

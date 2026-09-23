@@ -11,7 +11,10 @@ from decent_registry.dht.libp2p_dht import Libp2pKadDHT
 from decent_registry.durable_store import LMDBDatastore
 from decent_registry.encoding import (
     OPERATION_ORDINARY_UPDATE,
+    OPERATION_OWNER_KEY_ROTATION,
     OPERATION_UPGRADE,
+    RECORD_KIND_IDENTITY,
+    encode_multisignature_signed_update,
     encode_signed_update,
 )
 from decent_registry.multisig_bundle import (
@@ -22,7 +25,7 @@ from decent_registry.multisig_bundle import (
     sign_bundle,
 )
 from decent_registry.provider_schema import build_provider_payload_dict
-from decent_registry.record_validator import RecordValidator
+from decent_registry.record_validator import IdentityRecordResult, RecordValidator
 from decent_registry.signed_envelope import (
     decode_signed_envelope,
     encode_multisignature_envelope,
@@ -246,10 +249,56 @@ async def test_dht_rejects_legacy_write_after_multisig_upgrade(tmp_path):
     with pytest.raises(ValueError, match="legacy writes"):
         await adapter.put_signed_identity_record(identity_key, legacy_after_upgrade)
 
-    assert fake.values[adapter._kad_key(identity_key, kind="identity")] == upgrade
-    assert adapter._durable_store.get(
+    assert isinstance(adapter._durable_store, LMDBDatastore)
+    store = adapter._durable_store
+    assert store.get_history(
         kind="identity", key=bytes.fromhex(identity_key)
-    ) == upgrade
+    ) == (legacy, upgrade)
+    rotation_update = encode_multisignature_signed_update(
+        record_fields={1: OWNER_NAME, 2: keypairs[3].public_key.to_bytes()},
+        payload={},
+        seq=3,
+        authorization={
+            1: 1,
+            2: RECORD_KIND_IDENTITY,
+            3: OPERATION_OWNER_KEY_ROTATION,
+            4: 1,
+            5: 2,
+            6: _signer_set(keypairs[:3]),
+            7: hashlib.sha256(upgrade_bundle.signed_update_bytes).digest(),
+        },
+    )
+    rotation = encode_multisignature_envelope(
+        signed_update_bytes=rotation_update,
+        proofs=[
+            {
+                1: "a",
+                2: make_signed_update_signature(
+                    signed_update_bytes_canonical=rotation_update,
+                    owner_private_key=keypairs[0].private_key,
+                ),
+            },
+            {
+                1: "b",
+                2: make_signed_update_signature(
+                    signed_update_bytes_canonical=rotation_update,
+                    owner_private_key=keypairs[1].private_key,
+                ),
+            },
+        ],
+    )
+    await adapter.put_signed_identity_record(identity_key, rotation)
+
+    assert fake.values[adapter._kad_key(identity_key, kind="identity")] == rotation
+    assert store.get(
+        kind="identity", key=bytes.fromhex(identity_key)
+    ) == rotation
+    assert store.get_history(
+        kind="identity", key=bytes.fromhex(identity_key)
+    ) == (legacy, upgrade, rotation)
+    resolved = await adapter.get_signed_identity_record(identity_key)
+    assert isinstance(resolved, IdentityRecordResult)
+    assert resolved.owner_public_key == keypairs[3].public_key.to_bytes()
 
 
 @pytest.mark.trio
@@ -295,3 +344,153 @@ async def test_dht_preserves_legacy_put_behavior_with_legacy_durable_cache(tmp_p
     resolved = await adapter.get_signed_provider_record(OBJECT_HASH)
     assert resolved is not None
     assert resolved.provider_url.endswith("current.bin")
+
+
+def _legacy_rotation_envelope(keypairs: list[Any], *, seq: int = 2) -> bytes:
+    owner_name = OWNER_NAME
+    previous = encode_signed_update(
+        record_fields={1: owner_name, 2: keypairs[0].public_key.to_bytes()},
+        payload={},
+        seq=seq - 1,
+    )
+    signer_set = _signer_set([keypairs[3], keypairs[1], keypairs[2]])
+    update = encode_multisignature_signed_update(
+        record_fields={1: owner_name, 2: keypairs[3].public_key.to_bytes()},
+        payload={},
+        seq=seq,
+        authorization={
+            1: 1,
+            2: RECORD_KIND_IDENTITY,
+            3: OPERATION_OWNER_KEY_ROTATION,
+            4: 1,
+            5: 2,
+            6: signer_set,
+            7: hashlib.sha256(previous).digest(),
+        },
+    )
+    return encode_multisignature_envelope(
+        signed_update_bytes=update,
+        proofs=[
+            {
+                1: None,
+                2: make_signed_update_signature(
+                    signed_update_bytes_canonical=update,
+                    owner_private_key=keypairs[0].private_key,
+                ),
+            }
+        ],
+    )
+
+
+def _legacy_identity(keypair: Any, *, seq: int = 1) -> bytes:
+    signed_update = encode_signed_update(
+        record_fields={1: OWNER_NAME, 2: keypair.public_key.to_bytes()},
+        payload={},
+        seq=seq,
+    )
+    return encode_signed_envelope(
+        signed_update_bytes=signed_update,
+        signature=make_signed_update_signature(
+            signed_update_bytes_canonical=signed_update,
+            owner_private_key=keypair.private_key,
+        ),
+    )
+
+
+@pytest.mark.trio
+async def test_dht_accepts_legacy_owner_rotation_and_requires_history_for_readback(tmp_path):
+    keypairs = _keypairs()
+    adapter = _adapter(tmp_path)
+    fake = adapter.dht
+    identity_key = hashlib.sha256(OWNER_NAME).hexdigest()
+    record_key = bytes.fromhex(identity_key)
+    legacy = _legacy_identity(keypairs[0])
+    rotation = _legacy_rotation_envelope(keypairs)
+    kad_key = adapter._kad_key(identity_key, kind="identity")
+
+    await adapter.put_signed_identity_record(identity_key, legacy)
+    await adapter.put_signed_identity_record(identity_key, rotation)
+
+    assert fake.values[kad_key] == rotation
+    assert isinstance(adapter._durable_store, LMDBDatastore)
+    store = adapter._durable_store
+    assert store.get_history(kind="identity", key=record_key) == (legacy, rotation)
+    resolved = await adapter.get_signed_identity_record(identity_key)
+    assert isinstance(resolved, IdentityRecordResult)
+    assert resolved.owner_public_key == keypairs[3].public_key.to_bytes()
+
+    store.open()
+    assert store._env is not None
+    assert store._accepted_db is not None
+    with store._env.begin(write=True) as txn:
+        txn.delete(
+            store._history_key(kind="identity", key=record_key),
+            db=store._accepted_db,
+        )
+
+    assert await adapter.get_signed_identity_record(identity_key) is None
+
+
+@pytest.mark.trio
+async def test_dht_get_rejects_self_authorized_identity_without_history(tmp_path):
+    keypairs = _keypairs()
+    adapter = _adapter(tmp_path)
+    record_key = hashlib.sha256(OWNER_NAME).digest()
+    identity_key = record_key.hex()
+    envelope = _finalize(
+        draft_identity_bundle(
+            owner_name=OWNER_NAME,
+            owner_public_key=keypairs[3].public_key.to_bytes(),
+            seq=2,
+            signer_set=_signer_set(keypairs[:3]),
+            operation=OPERATION_ORDINARY_UPDATE,
+            predecessor_state_hash=bytes(32),
+        ),
+        keypairs,
+    )
+    kad_key = adapter._kad_key(identity_key, kind="identity")
+    adapter.dht.values[kad_key] = envelope
+
+    assert await adapter.get_signed_identity_record(identity_key) is None
+    assert isinstance(adapter._durable_store, LMDBDatastore)
+    store = adapter._durable_store
+    assert store.get(kind="identity", key=record_key) is None
+
+
+@pytest.mark.trio
+async def test_dht_rejects_rotation_without_predecessor_history_without_writes(tmp_path):
+    keypairs = _keypairs()
+    adapter = _adapter(tmp_path)
+    fake = adapter.dht
+    identity_key = hashlib.sha256(OWNER_NAME).hexdigest()
+    record_key = bytes.fromhex(identity_key)
+    genesis = _finalize(
+        draft_identity_bundle(
+            owner_name=OWNER_NAME,
+            owner_public_key=keypairs[0].public_key.to_bytes(),
+            seq=1,
+            signer_set=_signer_set(keypairs[:3]),
+        ),
+        keypairs,
+    )
+    kad_key = adapter._kad_key(identity_key, kind="identity")
+    await adapter.put_signed_identity_record(identity_key, genesis)
+
+    assert isinstance(adapter._durable_store, LMDBDatastore)
+    store = adapter._durable_store
+    store.open()
+    assert store._env is not None
+    assert store._accepted_db is not None
+    with store._env.begin(write=True) as txn:
+        txn.delete(
+            store._history_key(kind="identity", key=record_key),
+            db=store._accepted_db,
+        )
+
+    candidate = _legacy_rotation_envelope(keypairs, seq=2)
+    with pytest.raises(ValueError, match="complete predecessor history"):
+        await adapter.put_signed_identity_record(identity_key, candidate)
+
+    assert fake.values[kad_key] == genesis
+    assert store.get(kind="identity", key=record_key) == genesis
+    assert store.get_history(kind="identity", key=record_key) is None

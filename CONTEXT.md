@@ -22,6 +22,9 @@ _Avoid_: Username, account name
 **Owner Public Key**: The Ed25519 public key bytes that the registry uses to verify signatures for a record key (and to enforce owner-binding on overwrite).
 _Avoid_: Identity key, public address
 
+**Owner-Key Rotation**: An Identity Record transition that changes its Owner Public Key while retaining the same Owner Name, Object Key, and authenticated predecessor lineage.
+_Avoid_: Key rollover, owner-key replacement
+
 **Object Key**: The DHT lookup key for an Identity Record derived from the owner name bytes.
 _Avoid_: Identifier
 
@@ -31,7 +34,7 @@ _Avoid_: Hash
 **Seq**: A non-negative integer that orders overwrites for a given record key. Later overwrites must have strictly larger Seq.
 _Avoid_: Version, nonce
 
-**Owner Binding**: The rule that the first accepted SignedUpdate for a record key commits that record key to a specific Owner Public Key; later overwrites must use the same Owner Public Key.
+**Owner Binding**: The rule that the first accepted SignedUpdate for a record key commits that record key to a specific Owner Public Key; later overwrites preserve it except through a validated Owner-Key Rotation.
 _Avoid_: Ownership, key binding
 
 **Canonical CBOR**: Deterministic CBOR encoding required so the bytes that are signed/verified are reproducible.
@@ -75,5 +78,5 @@ _Avoid_: censorship-proof
 
 ## Rules
 
-- **Overwrite rules**: For a fixed DHT key, later updates are accepted only if the SignedUpdate is valid, the signature verifies, Seq strictly increases, and Owner Binding is consistent.
+- **Overwrite rules**: For a fixed DHT key, later updates require a valid SignedUpdate and signature, strictly increasing Seq, and consistent Owner Binding; only a validated operation-5 Owner-Key Rotation may change the bound Owner Public Key.
 - **Key mismatch rejection**: Updates are rejected when the derived lookup key does not match the record key being overwritten.

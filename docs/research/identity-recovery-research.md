@@ -1,9 +1,9 @@
 # Research: Secure owner recovery for lost private keys (#68)
 
 ## Problem
-Current identity record ownership in this repo is authenticated exclusively via the owner’s private key.
+Legacy Identity Record ownership is authenticated by the current Owner Public Key; version-1 records use their declared Signer Set threshold. Neither format provides a separate lost-key recovery path.
 
-If the owner private key is lost, the owner cannot produce a valid signed `SignedUpdate` that passes identity validation. The repo currently has no alternative recovery/authorization path.
+If the required legacy Owner Public Key signer or enough version-1 Signer Set members are unavailable, the record cannot be updated through its existing authorization policy. The Registry has no separate lost-key recovery policy.
 
 Goal: add a secure “lost key recovery” path using alternative authentication methods.
 
@@ -35,16 +35,15 @@ Key derivation:
 
 ### Identity validation invariants
 `validate_identity_overwrite` enforces:
-- CBOR canonical form
-- Signature verification against `record_fields[2]` (owner public key)
-- `seq` strictly increasing per `record_key`
-- **owner binding:** on overwrite, if an existing identity record exists for `record_key`, the incoming update’s `owner_public_key` must match the previously recorded owner public key.
+- Canonical encoding and valid signatures under the applicable authorization policy.
+- Strictly increasing `Seq` per `record_key`.
+- Legacy overwrites preserve the existing Owner Public Key.
+- Version-1 Identity operations preserve the Owner Public Key except validated operation-5 Owner-Key Rotation, which requires a complete authenticated predecessor history and its operation-specific proofs.
 
-As implemented in `verification.py`:
-- `_enforce_seq_and_owner_binding(...)` raises `ValueError("owner collision")` when the owner public key differs from the stored one.
+The legacy `_enforce_seq_and_owner_binding(...)` path raises `ValueError("owner collision")` when the legacy Owner Public Key differs from the stored one. Operation 5 is not lost-key recovery: it requires authorization from the existing legacy owner or version-1 Signer Set.
 
 Implication:
-- Any recovery scheme that changes the owner public key on an identity record will require explicit protocol/validator changes.
+- A separate lost-key recovery scheme still requires an explicit Recovery Policy and validator logic; operation 5 alone does not provide recovery when the existing authorization material is unavailable.
 
 ### Payload handling
 For identity record validation, the current implementation primarily extracts/validates `record_fields[1]` and `[2]` and uses seq monotonicity.
@@ -217,8 +216,9 @@ This is a v2 extension proposal. It requires validator changes, but it can be de
 - **Alias identity records**: identity records for aliases that link to the primary identity record.
 
 ### Existing limitation
-- Validation currently binds `record_key -> owner_public_key` irrevocably under overwrite (seq+owner collision).
-- Recovery that changes owner key cannot succeed without adding recovery-aware validator logic.
+- Legacy updates and every version-1 operation except validated operation 5 preserve the existing `record_key -> owner_public_key` binding.
+- Operation 5 supports authorized Owner-Key Rotation when the existing legacy-owner proof or version-1 Signer Set threshold is available; it does not recover a record after that authorization material is lost.
+- Separate recovery that changes the Owner Public Key still requires recovery-aware protocol and validator logic.
 
 ### Proposed v2 identity payload extension (conceptual)
 Keep `record_fields` structure (for now):
@@ -276,9 +276,10 @@ Mechanism-specific proof is included in the recovery update:
   - include `t` guardian signatures over the same challenge
 
 ### 3) Verification logic required (v2)
-Validator must change from today’s overwrite model:
-- Today: overwrite requires owner public key equality for an existing record.
-- Recovery mode must allow owner key rotation when a valid recovery proof is provided.
+A separate recovery policy needs a path beyond the existing authorization rules:
+- Legacy overwrites and version-1 operations other than operation 5 preserve the existing Owner Public Key.
+- Operation 5 performs a narrowly scoped Owner-Key Rotation only when the existing predecessor authorization is available; it is not a recovery proof.
+- A recovery mode must authorize a key change through a separately validated recovery proof when the legacy owner or required version-1 threshold is unavailable.
 
 At minimum:
 - Identify whether update is for a primary or alias identity record.

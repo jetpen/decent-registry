@@ -157,7 +157,7 @@ Current implementation details are linked to the canonical protocol, setup, conf
 
 **Sovereignty and privacy properties:** A single lost key does not necessarily prevent updates, and collective authorization reduces dependence on one signer. Private-key secrecy remains absolute; only public verification material and signatures are exchanged.
 
-**Current-versus-future status:** The canonical version-1 wire format, local CLI Bundle workflow, finalized Identity and Provider Record submission, resolution metadata, explicit legacy upgrade, and signer replacement are implemented. See [Multisignature Records and Migration](multisignature-records.md).
+**Current-versus-future status:** The canonical version-1 wire format, local CLI Bundle workflow, finalized Identity and Provider Record submission, resolution metadata, explicit legacy upgrade, signer replacement, and Registry-side Identity owner-key rotation acceptance are implemented. Wallet private-key rotation dispatch, consent, and publication confirmation remain unimplemented; Registry acceptance alone is not wallet confirmation. See [Multisignature Records and Migration](multisignature-records.md).
 
 **Limitations:** Two lost or compromised signers cannot be recovered through ordinary 2-of-3 authorization. Separate recovery policy, FROST, deployment, availability, privacy, and application tooling remain future work. See [2-of-3 multisig key recovery research](research/2-of-3-multisig-key-recovery.md).
 

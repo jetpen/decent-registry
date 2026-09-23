@@ -80,7 +80,7 @@ Creates and circulates a local **Multisignature Bundle** without centralizing pr
 - `decent-registry bundle merge --input <bundle> --proof <proof-bundle> --output <merged-bundle>`
 - `decent-registry bundle finalize --input <merged-bundle> --output <signed-envelope>`
 
-`bundle sign` reads one local Ed25519 private-key PEM and emits a detached proof. `bundle merge` verifies proof binding, signer membership, duplicate rejection, and signature validity. `bundle finalize` requires the threshold or explicit legacy-owner upgrade proof rule. Partial bundles are local artifacts and must never be published. Signer replacement and explicit legacy upgrade are documented in [`docs/multisignature-records.md`](docs/multisignature-records.md), which contains the complete Identity and Provider workflows, wire format, migration rules, and compatibility matrix.
+`bundle sign` reads one local Ed25519 private-key PEM and emits a detached proof. `bundle merge` verifies proof binding, signer membership, duplicate rejection, and signature validity. `bundle finalize` requires the threshold or explicit legacy-owner upgrade proof rule. The local Bundle drafting CLI supports `genesis`, `ordinary-update`, `replace-signers`, and `upgrade`; it does not draft owner-key rotation operation 5. Partial bundles are local artifacts and must never be published. Operation-5 rotation is accepted through `put identity --finalized-envelope` when supplied as a prebuilt finalized Identity SignedEnvelope. Signer replacement, explicit legacy upgrade, and owner-key rotation are documented in [`docs/multisignature-records.md`](docs/multisignature-records.md), which contains the wire format, migration rules, and compatibility matrix.
 
 ### `put`
 
@@ -157,7 +157,7 @@ decent-registry put identity \
   --seq 1
 ```
 
-`legacy mode` creates a legacy SignedEnvelope. Finalized mode uses `--finalized-envelope` and accepts the versioned multisignature SignedEnvelope produced by the Bundle workflow without private-key material.
+`legacy mode` creates a legacy SignedEnvelope and cannot rotate the Owner Public Key. Finalized mode uses `--finalized-envelope` and accepts versioned multisignature SignedEnvelopes without private-key material. Submit operation-5 Identity rotation through this same option as a prebuilt finalized SignedEnvelope; the `put identity` syntax is unchanged.
 
 ### `get`
 
@@ -195,6 +195,8 @@ On success prints JSON:
 - `owner_public_key`
 - `seq`
 - `authorization` for version-1 multisignature records, including the Signer Set, threshold, epoch, operation, predecessor-state hash, and accepted state hash
+
+Non-genesis version-1 Identity records are returned only when the node's configured local datastore has a complete, verified predecessor history. If that history is missing or incomplete, `get identity` fails closed, prints `not found`, and exits non-zero.
 
 On missing prints `not found` and exits non-zero.
 
