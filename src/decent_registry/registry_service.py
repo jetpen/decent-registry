@@ -29,6 +29,10 @@ class RegistryDHT(Protocol):
         self, object_key_hex: str, quorum: int = 0
     ) -> dict[str, Any] | IdentityRecordResult | None: ...
 
+    async def confirm_identity_owner_key_rotation(
+        self, *, owner_name_hex: str, expected_envelope_cbor: bytes
+    ) -> IdentityRecordResult | None: ...
+
 
 def _parse_hex_bytes(value: str, *, name: str) -> bytes:
     try:
@@ -178,3 +182,15 @@ class RegistryService:
     ) -> dict[str, Any] | IdentityRecordResult | None:
         object_key_hex = _derive_identity_object_hash_from_owner_name_hex(owner_name_hex)
         return await self.dht.get_signed_identity_record(object_key_hex, quorum=quorum)
+
+    async def confirm_identity_owner_key_rotation(
+        self, *, owner_name_hex: str, expected_envelope_cbor: bytes
+    ) -> IdentityRecordResult | None:
+        """Return verified public state only after exact independent DHT read-back.
+
+        The result is read-back evidence, not a wallet confirmation capability.
+        """
+        return await self.dht.confirm_identity_owner_key_rotation(
+            owner_name_hex=owner_name_hex,
+            expected_envelope_cbor=expected_envelope_cbor,
+        )

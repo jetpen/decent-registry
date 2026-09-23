@@ -43,6 +43,8 @@ class FakeDHT:
         self.identity_puts: list[tuple[str, bytes]] = []
         self.provider_result: Any = None
         self.identity_result: Any = None
+        self.identity_confirmation_result: Any = None
+        self.identity_confirmation_calls: list[tuple[str, bytes]] = []
 
     async def put_signed_provider_record(self, object_hash: str, envelope_cbor: bytes) -> None:
         self.provider_puts.append((object_hash, envelope_cbor))
@@ -55,6 +57,14 @@ class FakeDHT:
 
     async def get_signed_identity_record(self, object_key_hex: str, quorum: int = 0) -> Any:
         return self.identity_result
+
+    async def confirm_identity_owner_key_rotation(
+        self, *, owner_name_hex: str, expected_envelope_cbor: bytes
+    ) -> Any:
+        self.identity_confirmation_calls.append(
+            (owner_name_hex, expected_envelope_cbor)
+        )
+        return self.identity_confirmation_result
 
 
 def test_registry_service_submits_finalized_multisig_envelopes_without_private_keys():
@@ -117,3 +127,22 @@ def test_registry_service_get_preserves_typed_results_and_quorum():
 
     assert provider is dht.provider_result
     assert identity is dht.identity_result
+
+
+def test_registry_service_owner_rotation_confirmation_uses_validated_dht_result():
+    dht = FakeDHT()
+    dht.identity_confirmation_result = object()
+    service = RegistryService(dht=dht)
+    finalized_envelope = b"finalized-public-envelope"
+
+    import asyncio
+
+    result = asyncio.run(
+        service.confirm_identity_owner_key_rotation(
+            owner_name_hex=OWNER_NAME.hex(),
+            expected_envelope_cbor=finalized_envelope,
+        )
+    )
+
+    assert result is dht.identity_confirmation_result
+    assert dht.identity_confirmation_calls == [(OWNER_NAME.hex(), finalized_envelope)]

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import trio
@@ -77,6 +77,8 @@ def _adapter(tmp_path):
     )
     adapter._validator = RecordValidator()
     adapter._accepted_lock = trio.Lock()
+    adapter._remote_identity_reader = None
+    adapter._bootstrap_peers = []
     return adapter
 
 
@@ -300,6 +302,14 @@ async def test_dht_rejects_legacy_write_after_multisig_upgrade(tmp_path):
     assert isinstance(resolved, IdentityRecordResult)
     assert resolved.owner_public_key == keypairs[3].public_key.to_bytes()
 
+    adapter._remote_identity_reader = FakeRemoteIdentityReader(rotation)
+    remote_confirmed = await adapter.confirm_identity_owner_key_rotation(
+        owner_name_hex=OWNER_NAME.hex(), expected_envelope_cbor=rotation
+    )
+    assert isinstance(remote_confirmed, IdentityRecordResult)
+    assert remote_confirmed.seq == 3
+    assert remote_confirmed.owner_public_key == keypairs[3].public_key.to_bytes()
+
 
 @pytest.mark.trio
 async def test_dht_preserves_legacy_put_behavior_with_legacy_durable_cache(tmp_path):
@@ -494,3 +504,104 @@ async def test_dht_rejects_rotation_without_predecessor_history_without_writes(t
     assert fake.values[kad_key] == genesis
     assert store.get(kind="identity", key=record_key) == genesis
     assert store.get_history(kind="identity", key=record_key) is None
+
+
+class FakeRemoteIdentityReader:
+    def __init__(self, envelope: bytes | None) -> None:
+        self.envelope = envelope
+        self.calls: list[str] = []
+
+    async def read_remote_identity_envelope(self, object_key_hex: str) -> bytes | None:
+        self.calls.append(object_key_hex)
+        return self.envelope
+
+
+@pytest.mark.trio
+async def test_owner_rotation_confirmation_requires_exact_remote_value_and_history(
+    tmp_path,
+):
+    keypairs = _keypairs()
+    adapter = _adapter(tmp_path)
+    identity_key = hashlib.sha256(OWNER_NAME).hexdigest()
+    record_key = bytes.fromhex(identity_key)
+    legacy = _legacy_identity(keypairs[0])
+    rotation = _legacy_rotation_envelope(keypairs)
+
+    await adapter.put_signed_identity_record(identity_key, legacy)
+    await adapter.put_signed_identity_record(identity_key, rotation)
+    reader = FakeRemoteIdentityReader(None)
+    adapter._remote_identity_reader = reader
+
+    # A locally accepted/written candidate is not remote evidence.
+    assert (
+        await adapter.confirm_identity_owner_key_rotation(
+            owner_name_hex=OWNER_NAME.hex(), expected_envelope_cbor=rotation
+        )
+        is None
+    )
+    assert reader.calls == [identity_key]
+
+    reader.envelope = rotation
+    confirmed = await adapter.confirm_identity_owner_key_rotation(
+        owner_name_hex=OWNER_NAME.hex(), expected_envelope_cbor=rotation
+    )
+    assert isinstance(confirmed, IdentityRecordResult)
+    assert confirmed.owner_name_hex == OWNER_NAME.hex()
+    assert confirmed.owner_public_key == keypairs[3].public_key.to_bytes()
+    assert confirmed.seq == 2
+    assert confirmed.authorization.operation == OPERATION_OWNER_KEY_ROTATION
+
+    # A remote predecessor does not confirm the exact candidate.
+    reader.envelope = legacy
+    assert (
+        await adapter.confirm_identity_owner_key_rotation(
+            owner_name_hex=OWNER_NAME.hex(), expected_envelope_cbor=rotation
+        )
+        is None
+    )
+
+    # Even exact remote bytes are insufficient without the verified local chain.
+    assert isinstance(adapter._durable_store, LMDBDatastore)
+    adapter._durable_store.open()
+    assert adapter._durable_store._env is not None
+    assert adapter._durable_store._accepted_db is not None
+    with adapter._durable_store._env.begin(write=True) as txn:
+        txn.delete(
+            adapter._durable_store._history_key(kind="identity", key=record_key),
+            db=adapter._durable_store._accepted_db,
+        )
+    reader.envelope = rotation
+    assert (
+        await adapter.confirm_identity_owner_key_rotation(
+            owner_name_hex=OWNER_NAME.hex(), expected_envelope_cbor=rotation
+        )
+        is None
+    )
+
+
+@pytest.mark.trio
+async def test_remote_identity_read_uses_a_fresh_network_reader_not_writer_cache(
+    tmp_path,
+):
+    identity_key = hashlib.sha256(OWNER_NAME).hexdigest()
+    kad_key = f"/decent-registry/identity/{identity_key}"
+    fresh_remote_value = b"remote-peer-value"
+    stale_writer_value = b"writer-local-cache"
+    unconfigured = _adapter(tmp_path / "unconfigured")
+    cast(FakeKad, unconfigured.dht).values[kad_key] = stale_writer_value
+    assert await unconfigured.read_remote_identity_envelope(identity_key) is None
+
+    async with Libp2pKadDHT() as remote_peer:
+        peer_address = remote_peer.get_listen_multiaddr()
+        if "/p2p/" not in peer_address:
+            peer_address = f"{peer_address}/p2p/{remote_peer.host.get_id().to_string()}"
+        await remote_peer.dht.put_value(kad_key, fresh_remote_value)
+
+        adapter = _adapter(tmp_path)
+        adapter._bootstrap_peers = [peer_address]
+        cast(FakeKad, adapter.dht).values[kad_key] = stale_writer_value
+
+        assert (
+            await adapter.read_remote_identity_envelope(identity_key)
+            == fresh_remote_value
+        )

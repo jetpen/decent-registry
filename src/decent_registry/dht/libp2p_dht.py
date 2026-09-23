@@ -2,7 +2,7 @@ import hashlib
 import sys
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 import cbor2
 import trio
@@ -99,6 +99,19 @@ def _result_seq_and_state_hash(result: Any, envelope_cbor: bytes) -> tuple[int, 
     return seq, hashlib.sha256(signed_update_bytes).digest()
 
 
+class RemoteIdentityEnvelopeReader(Protocol):
+    """Read one Identity envelope from a remote DHT peer without local fallback.
+
+    Implementations must not consult the writer's DHT value store, durable
+    accepted-state cache, or write response. ``None`` means that independent
+    remote evidence was unavailable.
+    """
+
+    async def read_remote_identity_envelope(
+        self, object_key_hex: str
+    ) -> bytes | None: ...
+
+
 class Libp2pKadDHT:
     """Thin adapter over libp2p Python Kad-DHT.
 
@@ -115,11 +128,16 @@ class Libp2pKadDHT:
         *,
         key_pair: KeyPair | None = None,
         durable_store: StorageBackend | None = None,
+        dht_mode: DHTMode = DHTMode.SERVER,
+        remote_identity_reader: RemoteIdentityEnvelopeReader | None = None,
     ):
         self._key_pair = key_pair if key_pair is not None else create_new_key_pair()
         self._listen = Multiaddr(listen)
         self._host = new_host(key_pair=self._key_pair, enable_tcp=True)
         self._durable_store = durable_store
+        self._dht_mode = dht_mode
+        self._remote_identity_reader = remote_identity_reader
+        self._bootstrap_peers: list[str] = []
         self._validator = RecordValidator()
         self._accepted_lock = trio.Lock()
 
@@ -151,7 +169,7 @@ class Libp2pKadDHT:
         # Construct Kad-DHT once the swarm is running
         self._dht = KadDHT(
             self._host,
-            DHTMode.SERVER,
+            self._dht_mode,
             enable_random_walk=False,
             strict_validation=False,
         )
@@ -208,6 +226,8 @@ class Libp2pKadDHT:
 
         peer_info = info_from_p2p_addr(Multiaddr(remote_tcp_multiaddr))
         await self._host.connect(peer_info)
+        if remote_tcp_multiaddr not in self._bootstrap_peers:
+            self._bootstrap_peers.append(remote_tcp_multiaddr)
 
     def _kad_key(self, object_hash: str, *, kind: str = "provider") -> str:
         return f"/decent-registry/{kind}/{object_hash}"
@@ -404,6 +424,96 @@ class Libp2pKadDHT:
                     kind="identity", key=record_key, value=envelope_cbor, result=result
                 )
             await self.dht.put_value(kad_key, envelope_cbor)
+
+    async def read_remote_identity_envelope(self, object_key_hex: str) -> bytes | None:
+        """Read an Identity envelope through a fresh, cache-empty DHT client.
+
+        The result comes only from a remote DHT response. This method never
+        consults the current DHT value store, durable accepted state, or a
+        preceding write result. A single peer response proves retrieval from
+        that peer at read time, not network-wide replication or currentness.
+        """
+        try:
+            record_key = bytes.fromhex(object_key_hex)
+        except ValueError:
+            raise ValueError("identity object key must be valid hex") from None
+        if len(record_key) != 32:
+            raise ValueError("identity object key must be 32 bytes")
+        canonical_object_key_hex = record_key.hex()
+
+        remote_reader = self._remote_identity_reader
+        if remote_reader is not None:
+            try:
+                envelope = await remote_reader.read_remote_identity_envelope(
+                    canonical_object_key_hex
+                )
+            except Exception:
+                return None
+        else:
+            bootstrap_peers = tuple(self._bootstrap_peers)
+            if not bootstrap_peers:
+                return None
+            try:
+                async with Libp2pKadDHT(
+                    listen="/ip4/127.0.0.1/tcp/0",
+                    durable_store=None,
+                    dht_mode=DHTMode.CLIENT,
+                ) as remote_dht:
+                    for peer in bootstrap_peers:
+                        await remote_dht.bootstrap(peer)
+                    envelope = await remote_dht._read_dht_value(
+                        remote_dht._kad_key(canonical_object_key_hex, kind="identity")
+                    )
+            except Exception:
+                return None
+
+        if envelope is None:
+            return None
+        if not isinstance(envelope, (bytes, bytearray)):
+            return None
+        return bytes(envelope)
+
+    async def confirm_identity_owner_key_rotation(
+        self, *, owner_name_hex: str, expected_envelope_cbor: bytes
+    ) -> IdentityRecordResult | None:
+        """Return validated public state only after exact independent read-back.
+
+        Local predecessor history is used only to verify the returned remote
+        envelope. It is never used as the read-back value or as a fallback.
+        """
+        try:
+            owner_name = bytes.fromhex(owner_name_hex)
+        except ValueError:
+            raise ValueError("owner_name must be valid hex") from None
+        if not isinstance(expected_envelope_cbor, (bytes, bytearray)):
+            raise TypeError("expected Identity SignedEnvelope must be bytes")
+        expected_envelope = bytes(expected_envelope_cbor)
+        record_key = hashlib.sha256(owner_name).digest()
+        remote_envelope = await self.read_remote_identity_envelope(record_key.hex())
+        if remote_envelope is None or remote_envelope != expected_envelope:
+            return None
+
+        predecessor_chain = self._history_ending_at(
+            self._durable_history(kind="identity", key=record_key),
+            remote_envelope,
+        )
+        if predecessor_chain is None:
+            return None
+        try:
+            result = self._validator.validate_identity_get(
+                record_key=record_key,
+                envelope_cbor=remote_envelope,
+                predecessor_chain=predecessor_chain,
+            )
+        except Exception:
+            return None
+        if (
+            not isinstance(result, IdentityRecordResult)
+            or result.owner_name_hex != owner_name.hex()
+            or result.authorization.operation != OPERATION_OWNER_KEY_ROTATION
+        ):
+            return None
+        return result
 
     async def get_signed_identity_record(
         self, object_key_hex: str, quorum: int = 0
