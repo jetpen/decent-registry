@@ -459,8 +459,15 @@ class Libp2pKadDHT:
                     durable_store=None,
                     dht_mode=DHTMode.CLIENT,
                 ) as remote_dht:
+                    connected = False
                     for peer in bootstrap_peers:
-                        await remote_dht.bootstrap(peer)
+                        try:
+                            await remote_dht.bootstrap(peer)
+                        except Exception:
+                            continue
+                        connected = True
+                    if not connected:
+                        return None
                     envelope = await remote_dht._read_dht_value(
                         remote_dht._kad_key(canonical_object_key_hex, kind="identity")
                     )

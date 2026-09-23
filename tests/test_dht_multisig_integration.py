@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import socket
 from typing import Any, cast
 
 import pytest
@@ -597,8 +598,20 @@ async def test_remote_identity_read_uses_a_fresh_network_reader_not_writer_cache
             peer_address = f"{peer_address}/p2p/{remote_peer.host.get_id().to_string()}"
         await remote_peer.dht.put_value(kad_key, fresh_remote_value)
 
+        with socket.socket() as closed_listener:
+            closed_listener.bind(("127.0.0.1", 0))
+            unavailable_port = closed_listener.getsockname()[1]
+        unavailable_peer = (
+            f"/ip4/127.0.0.1/tcp/{unavailable_port}/p2p/"
+            f"{remote_peer.host.get_id().to_string()}"
+        )
+        unavailable_only = _adapter(tmp_path / "unavailable")
+        unavailable_only._bootstrap_peers = [unavailable_peer]
+        cast(FakeKad, unavailable_only.dht).values[kad_key] = stale_writer_value
+        assert await unavailable_only.read_remote_identity_envelope(identity_key) is None
+
         adapter = _adapter(tmp_path)
-        adapter._bootstrap_peers = [peer_address]
+        adapter._bootstrap_peers = [unavailable_peer, peer_address]
         cast(FakeKad, adapter.dht).values[kad_key] = stale_writer_value
 
         assert (
