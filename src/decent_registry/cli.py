@@ -20,7 +20,11 @@ from decent_registry.config import (
     resolve_required_owner_privkey_pem_path,
     resolve_server_config,
 )
-from decent_registry.crypto_utils import load_ed25519_keypair_from_privkey_pem_path
+from decent_registry.crypto_utils import (
+    KeyGenerationError,
+    load_ed25519_keypair_from_privkey_pem_path,
+    write_ed25519_private_key_pem,
+)
 from decent_registry.encoding import (
     OPERATION_GENESIS,
     OPERATION_ORDINARY_UPDATE,
@@ -298,27 +302,13 @@ def _load_or_create_node_identity_key(datastore_path: str) -> KeyPair:
 
 
 def _keygen_command(args: argparse.Namespace) -> int:
-    output_path = args.output
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    from cryptography.hazmat.primitives.serialization import (
-        Encoding,
-        NoEncryption,
-        PrivateFormat,
-    )
-
     try:
-        priv = Ed25519PrivateKey.generate()
-        pem_bytes = priv.private_bytes(
-            Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()
-        )
-        with open(output_path, "wb") as f:
-            f.write(pem_bytes)
-        os.chmod(output_path, 0o600)
-        print(f"wrote {output_path} with mode 0o600")
+        write_ed25519_private_key_pem(args.output)
+        print(f"wrote {args.output} with mode 0o600")
         return 0
-    except OSError:
-        # No private key material in errors.
-        print("error: cannot write key file", file=sys.stderr)
+    except KeyGenerationError:
+        # No private key material or provider details in errors.
+        print("error: key generation failed", file=sys.stderr)
         return 1
 
 

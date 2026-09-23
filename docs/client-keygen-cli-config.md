@@ -19,10 +19,12 @@ decent-registry keygen --output <owner_privkey_pem_path>
 ```
 
 Behavior (from `src/decent_registry/cli.py`):
-- Generates an unencrypted Ed25519 private key in **PKCS#8 PEM** format.
+- Generates an unencrypted Ed25519 private key in **PKCS#8 PEM** format through the shared API in `src/decent_registry/crypto_utils.py`.
+- The shared API obtains exactly 32 seed bytes from Python's `secrets.token_bytes` OS-backed cryptographic randomness boundary. If that boundary is unavailable, replaced, fails, or returns malformed entropy, key generation fails closed; it never falls back to a general-purpose PRNG.
 - Writes the PEM to `<owner_privkey_pem_path>`.
 - Sets file permissions to `0600` (`os.chmod(output_path, 0o600)`).
-- Does not print key material.
+- Creates the output exclusively and does not overwrite an existing file. CSRNG failures occur before the destination is opened, and filesystem failures remove an empty partial file.
+- Does not print key material or provider/error details.
 
 Example:
 
