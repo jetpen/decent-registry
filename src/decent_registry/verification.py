@@ -569,11 +569,10 @@ def validate_multisignature_genesis(
 def validate_multisignature_envelope(
     *, record_key: bytes, envelope_cbor: bytes
 ) -> MultisignatureState:
-    """Validate an accepted multisignature envelope without a predecessor.
+    """Validate a self-contained multisignature state or Provider envelope.
 
-    Put validation uses ``validate_multisignature_update`` for the complete
-    transition. This entry point is for get paths and for reconstructing the
-    currently accepted state before validating its successor.
+    Identity transitions other than genesis require authenticated predecessor
+    history and must be passed to ``validate_multisignature_history`` instead.
     """
     parsed = _decode_multisignature_candidate(envelope_cbor)
     authorization = parsed[7]
@@ -586,6 +585,13 @@ def validate_multisignature_envelope(
             record_key=record_key,
             envelope_cbor=envelope_cbor,
         )
+
+    if authorization[2] == RECORD_KIND_IDENTITY and operation in {
+        OPERATION_ORDINARY_UPDATE,
+        OPERATION_REPLACE_SIGNERS,
+        OPERATION_UPGRADE,
+    }:
+        raise ValueError("complete predecessor history is required for Identity state")
 
     if operation == OPERATION_UPGRADE:
         if authorization[4] != 1:

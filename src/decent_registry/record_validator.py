@@ -7,6 +7,7 @@ import cbor2
 
 from decent_registry.encoding import (
     OPERATION_OWNER_KEY_ROTATION,
+    RECORD_KIND_IDENTITY,
     decode_canonical_signed_update,
     decode_multisignature_signed_update,
 )
@@ -219,6 +220,7 @@ class RecordValidator:
             candidate.signed_update_bytes
         )
         candidate_operation = candidate_update[4][3]
+        candidate_record_kind = candidate_update[4][2]
         if existing_envelope_cbor is not None:
             if _is_multisignature_envelope(existing_envelope_cbor):
                 if predecessor_chain is not None:
@@ -235,6 +237,13 @@ class RecordValidator:
                         record_key=record_key,
                         envelope_cbor=existing_envelope_cbor,
                     )
+                    if (
+                        candidate_record_kind == RECORD_KIND_IDENTITY
+                        and current_state.history is None
+                    ):
+                        raise ValueError(
+                            "complete predecessor history is required for Identity state"
+                        )
             else:
                 legacy_envelope_cbor = existing_envelope_cbor
         return validate_multisignature_update(
@@ -444,6 +453,12 @@ class RecordValidator:
                 state = validate_multisignature_envelope(
                     record_key=record_key,
                     envelope_cbor=envelope_cbor,
+                )
+            if state.record_kind != RECORD_KIND_IDENTITY:
+                raise ValueError("expected an Identity Record")
+            if state.history is None:
+                raise ValueError(
+                    "complete predecessor history is required for Identity state"
                 )
             signed_update = decode_multisignature_signed_update(
                 state.signed_update_bytes

@@ -229,6 +229,14 @@ class Libp2pKadDHT:
         return get_history(kind=kind, key=key)  # type: ignore[arg-type]
 
     @staticmethod
+    def _history_ending_at(
+        history: tuple[bytes, ...] | None, value: bytes | None
+    ) -> tuple[bytes, ...] | None:
+        if history and value is not None and history[-1] == value:
+            return history
+        return None
+
+    @staticmethod
     def _accepted_state_put_kwargs(
         *,
         kind: str,
@@ -381,13 +389,9 @@ class Libp2pKadDHT:
                 return
 
             raw_existing = _select_newest_envelope(raw_dht, raw_local)
-            raw_history = self._durable_history(kind="identity", key=record_key)
-            predecessor_chain = (
-                raw_history
-                if raw_history is not None
-                and raw_existing is not None
-                and raw_history[-1] == raw_existing
-                else None
+            predecessor_chain = self._history_ending_at(
+                self._durable_history(kind="identity", key=record_key),
+                raw_existing,
             )
             result = self._validator.validate_identity_overwrite(
                 record_key=record_key,
@@ -414,11 +418,9 @@ class Libp2pKadDHT:
             raw_current = raw_dht if raw_dht is not None else raw_local
         if raw_current is None:
             return None
-        raw_history = self._durable_history(kind="identity", key=record_key)
-        predecessor_chain = (
-            raw_history
-            if raw_history is not None and raw_history[-1] == raw_current
-            else None
+        predecessor_chain = self._history_ending_at(
+            self._durable_history(kind="identity", key=record_key),
+            raw_current,
         )
         try:
             result = self._validator.validate_identity_get(

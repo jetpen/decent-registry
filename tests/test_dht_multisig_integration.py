@@ -432,6 +432,32 @@ async def test_dht_accepts_legacy_owner_rotation_and_requires_history_for_readba
 
 
 @pytest.mark.trio
+async def test_dht_get_rejects_self_authorized_identity_without_history(tmp_path):
+    keypairs = _keypairs()
+    adapter = _adapter(tmp_path)
+    record_key = hashlib.sha256(OWNER_NAME).digest()
+    identity_key = record_key.hex()
+    envelope = _finalize(
+        draft_identity_bundle(
+            owner_name=OWNER_NAME,
+            owner_public_key=keypairs[3].public_key.to_bytes(),
+            seq=2,
+            signer_set=_signer_set(keypairs[:3]),
+            operation=OPERATION_ORDINARY_UPDATE,
+            predecessor_state_hash=bytes(32),
+        ),
+        keypairs,
+    )
+    kad_key = adapter._kad_key(identity_key, kind="identity")
+    adapter.dht.values[kad_key] = envelope
+
+    assert await adapter.get_signed_identity_record(identity_key) is None
+    assert isinstance(adapter._durable_store, LMDBDatastore)
+    store = adapter._durable_store
+    assert store.get(kind="identity", key=record_key) is None
+
+
+@pytest.mark.trio
 async def test_dht_rejects_rotation_without_predecessor_history_without_writes(tmp_path):
     keypairs = _keypairs()
     adapter = _adapter(tmp_path)

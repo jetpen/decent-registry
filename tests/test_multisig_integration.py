@@ -23,6 +23,7 @@ from decent_registry.multisig_bundle import (
 from decent_registry.provider_schema import build_provider_payload_dict
 from decent_registry.record_validator import RecordValidator
 from decent_registry.signed_envelope import (
+    decode_multisignature_envelope,
     decode_signed_envelope,
     encode_multisignature_envelope,
     encode_signed_envelope,
@@ -111,10 +112,55 @@ def test_identity_put_and_get_validate_multisig_state_and_metadata():
     resolved = validator.validate_identity_get(
         record_key=record_key,
         envelope_cbor=ordinary,
+        predecessor_chain=(genesis, ordinary),
     )
     assert resolved.owner_name_hex == OWNER_NAME.hex()
     assert resolved.authorization is not None
     assert resolved.authorization.state_hash == ordinary_result.authorization.state_hash
+
+
+def test_identity_without_predecessor_history_rejects_self_authorized_key_change():
+    keypairs = _keypairs()
+    record_key = hashlib.sha256(OWNER_NAME).digest()
+    signer_set = _signer_set(keypairs[:3])
+    forged_current = _complete(
+        draft_identity_bundle(
+            owner_name=OWNER_NAME,
+            owner_public_key=keypairs[3].public_key.to_bytes(),
+            seq=2,
+            signer_set=signer_set,
+            operation=OPERATION_ORDINARY_UPDATE,
+            predecessor_state_hash=bytes(32),
+        ),
+        keypairs,
+    )
+    current_update = decode_multisignature_envelope(forged_current)
+    candidate = _complete(
+        draft_identity_bundle(
+            owner_name=OWNER_NAME,
+            owner_public_key=keypairs[3].public_key.to_bytes(),
+            seq=3,
+            signer_set=signer_set,
+            operation=OPERATION_ORDINARY_UPDATE,
+            predecessor_state_hash=hashlib.sha256(
+                current_update.signed_update_bytes
+            ).digest(),
+        ),
+        keypairs,
+    )
+    validator = RecordValidator()
+
+    with pytest.raises(ValueError, match="complete predecessor history"):
+        validator.validate_identity_get(
+            record_key=record_key,
+            envelope_cbor=forged_current,
+        )
+    with pytest.raises(ValueError, match="complete predecessor history"):
+        validator.validate_identity_overwrite(
+            record_key=record_key,
+            envelope_cbor=candidate,
+            existing_envelope_cbor=forged_current,
+        )
 
 
 def test_provider_put_and_get_validate_multisig_payload_and_metadata():

@@ -879,7 +879,7 @@ def test_version_one_owner_rotation_requires_signed_legacy_anchor():
         )
 
 
-def test_owner_rotation_rejects_missing_or_tampered_predecessor_history():
+def test_identity_non_genesis_standalone_envelope_requires_history():
     keypairs = _keypairs()
     legacy, legacy_update = _legacy_identity_envelope(keypairs[0])
     record_key = hashlib.sha256(OWNER_NAME).digest()
@@ -896,25 +896,10 @@ def test_owner_rotation_rejects_missing_or_tampered_predecessor_history():
         ),
     )
     upgrade_envelope = _envelope(upgrade, [_proof("a", keypairs[0], upgrade)])
-    unproven_state = validate_multisignature_envelope(
-        record_key=record_key, envelope_cbor=upgrade_envelope
-    )
-    rotation = _rotation_update(
-        owner_public_key=keypairs[3].public_key.to_bytes(),
-        seq=6,
-        predecessor_state_hash=unproven_state.state_hash,
-        signer_set=signer_set,
-    )
-    rotation_envelope = _envelope(
-        rotation,
-        [_proof("a", keypairs[0], rotation), _proof("b", keypairs[1], rotation)],
-    )
 
     with pytest.raises(ValueError, match="complete predecessor history"):
-        validate_multisignature_update(
-            record_key=record_key,
-            envelope_cbor=rotation_envelope,
-            current_state=unproven_state,
+        validate_multisignature_envelope(
+            record_key=record_key, envelope_cbor=upgrade_envelope
         )
 
     tampered_legacy = legacy[:-1] + bytes([legacy[-1] ^ 1])
