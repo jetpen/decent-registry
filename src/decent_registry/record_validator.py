@@ -206,6 +206,18 @@ class RecordValidator:
             return None
 
     @staticmethod
+    def _require_history_ending_at(
+        *,
+        predecessor_chain: tuple[bytes, ...] | None,
+        envelope_cbor: bytes,
+        state_label: str,
+    ) -> None:
+        if not predecessor_chain or predecessor_chain[-1] != envelope_cbor:
+            raise ValueError(
+                f"predecessor history does not end at {state_label}"
+            )
+
+    @staticmethod
     def _validate_multisignature_transition(
         *,
         record_key: bytes,
@@ -224,8 +236,11 @@ class RecordValidator:
         if existing_envelope_cbor is not None:
             if _is_multisignature_envelope(existing_envelope_cbor):
                 if predecessor_chain is not None:
-                    if not predecessor_chain or predecessor_chain[-1] != existing_envelope_cbor:
-                        raise ValueError("predecessor history does not end at current state")
+                    RecordValidator._require_history_ending_at(
+                        predecessor_chain=predecessor_chain,
+                        envelope_cbor=existing_envelope_cbor,
+                        state_label="current state",
+                    )
                     current_state = validate_multisignature_history(
                         record_key=record_key,
                         envelopes=predecessor_chain,
@@ -443,8 +458,11 @@ class RecordValidator:
     ) -> IdentityOverwriteResult | IdentityRecordResult:
         if _is_multisignature_envelope(envelope_cbor):
             if predecessor_chain is not None:
-                if not predecessor_chain or predecessor_chain[-1] != envelope_cbor:
-                    raise ValueError("predecessor history does not end at accepted state")
+                self._require_history_ending_at(
+                    predecessor_chain=predecessor_chain,
+                    envelope_cbor=envelope_cbor,
+                    state_label="accepted state",
+                )
                 state = validate_multisignature_history(
                     record_key=record_key,
                     envelopes=predecessor_chain,

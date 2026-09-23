@@ -292,13 +292,14 @@ Enforcement details in `verification.py`:
   - prev seq is `existing_signed_update[3]`
 - checks:
   - if `seq <= prev.seq`: reject (`seq must be strictly increasing`)
-  - if `owner_public_key != prev.owner_public_key`: reject (`owner collision`)
+  - For legacy updates, if `owner_public_key != prev.owner_public_key`: reject (`owner collision`).
+- A version-1 Identity owner-key change is accepted only as a validated operation-5 Owner-Key Rotation, after its complete predecessor history and operation-specific proofs are verified. All other Identity operations preserve the Owner Public Key.
 
 Consequence:
-- First accepted update for a key binds the record to its `owner_public_key`.
+- The first accepted update for a key establishes its Owner Public Key; only a validated operation-5 Identity transition may change that binding.
 
-Key revocation is specified as a future design in closed issue #15 (allow object rewrites signed with an identity key that has been revoked).
-- Later overwrites must be signed by the same owner public key.
+Key revocation is a separate future design noted in closed issue #15 (allow object rewrites signed with an identity key that has been revoked).
+- Legacy overwrites must retain the same Owner Public Key. See [Multisignature Records and Migration](multisignature-records.md) for the operation-5 Identity exception.
 
 ---
 
