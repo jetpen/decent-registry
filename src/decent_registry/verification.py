@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
-from typing import Any, MutableMapping
+from typing import Any, MutableMapping, Sequence
 
 from libp2p.crypto.ed25519 import create_new_key_pair
 
 from decent_registry.encoding import (
     OPERATION_GENESIS,
     OPERATION_ORDINARY_UPDATE,
+    OPERATION_OWNER_KEY_ROTATION,
     OPERATION_REPLACE_SIGNERS,
     OPERATION_UPGRADE,
     RECORD_KIND_IDENTITY,
@@ -50,6 +51,7 @@ class MultisignatureState:
     seq: int
     threshold: int
     signer_set: tuple[tuple[str, bytes], ...]
+    history: tuple[bytes, ...] | None
 
     def __init__(
         self,
@@ -63,6 +65,7 @@ class MultisignatureState:
         seq: int,
         threshold: int,
         signer_set: tuple[tuple[str, bytes], ...],
+        history: tuple[bytes, ...] | None = None,
         _validation_token: object,
     ) -> None:
         if _validation_token is not _STATE_VALIDATION_TOKEN:
@@ -76,6 +79,11 @@ class MultisignatureState:
         object.__setattr__(self, "seq", seq)
         object.__setattr__(self, "threshold", threshold)
         object.__setattr__(self, "signer_set", tuple(signer_set))
+        object.__setattr__(
+            self,
+            "history",
+            None if history is None else tuple(bytes(item) for item in history),
+        )
 
 
 # Cache the concrete Ed25519 public key class (the one libp2p returns).
@@ -416,6 +424,7 @@ def _candidate_state(
         bytes,
         dict[int, Any],
     ],
+    history: tuple[bytes, ...] | None = None,
 ) -> MultisignatureState:
     record_kind = parsed[7][2]
     owner_public_key = (
@@ -431,8 +440,17 @@ def _candidate_state(
         seq=parsed[5],
         threshold=parsed[7][5],
         signer_set=_signer_tuple(parsed[7]),
+        history=history if record_kind == RECORD_KIND_IDENTITY else None,
         _validation_token=_STATE_VALIDATION_TOKEN,
     )
+
+
+def _append_history(
+    current_state: MultisignatureState, envelope_cbor: bytes
+) -> tuple[bytes, ...] | None:
+    if current_state.history is None:
+        return None
+    return (*current_state.history, bytes(envelope_cbor))
 
 
 def _require_complete_2_of_3(authorization: dict[int, Any]) -> None:
@@ -541,7 +559,11 @@ def validate_multisignature_genesis(
         signer_set=_signer_tuple(authorization),
         threshold=authorization[5],
     )
-    return _candidate_state(record_key=record_key, parsed=parsed)
+    return _candidate_state(
+        record_key=record_key,
+        parsed=parsed,
+        history=(bytes(envelope_cbor),),
+    )
 
 
 def validate_multisignature_envelope(
@@ -588,6 +610,8 @@ def validate_multisignature_envelope(
             raise ValueError("invalid legacy owner proof")
         return _candidate_state(record_key=record_key, parsed=parsed)
 
+    if operation == OPERATION_OWNER_KEY_ROTATION:
+        raise ValueError("complete predecessor history is required for owner rotation")
     if operation not in {OPERATION_ORDINARY_UPDATE, OPERATION_REPLACE_SIGNERS}:
         raise ValueError(f"unsupported multisignature operation: {operation}")
     _validate_threshold_proofs(
@@ -623,7 +647,11 @@ def validate_multisignature_ordinary_update(
         signer_set=current_state.signer_set,
         threshold=current_state.threshold,
     )
-    return _candidate_state(record_key=record_key, parsed=parsed)
+    return _candidate_state(
+        record_key=record_key,
+        parsed=parsed,
+        history=_append_history(current_state, envelope_cbor),
+    )
 
 
 def validate_multisignature_signer_replacement(
@@ -649,7 +677,11 @@ def validate_multisignature_signer_replacement(
         signer_set=current_state.signer_set,
         threshold=current_state.threshold,
     )
-    return _candidate_state(record_key=record_key, parsed=parsed)
+    return _candidate_state(
+        record_key=record_key,
+        parsed=parsed,
+        history=_append_history(current_state, envelope_cbor),
+    )
 
 
 def _decode_legacy_state(
@@ -751,7 +783,232 @@ def validate_multisignature_upgrade(
         raise ValueError("invalid legacy owner proof") from exc
     if not valid:
         raise ValueError("invalid legacy owner proof")
-    return _candidate_state(record_key=record_key, parsed=parsed)
+    return _candidate_state(
+        record_key=record_key,
+        parsed=parsed,
+        history=(bytes(legacy_envelope_cbor), bytes(envelope_cbor)),
+    )
+
+
+def _validate_owner_rotation_from_legacy(
+    *, record_key: bytes, envelope_cbor: bytes, legacy_envelope_cbor: bytes
+) -> MultisignatureState:
+    parsed = _decode_multisignature_candidate(envelope_cbor)
+    authorization = parsed[7]
+    if authorization[3] != OPERATION_OWNER_KEY_ROTATION:
+        raise ValueError("expected owner-key-rotation operation")
+    if authorization[2] != RECORD_KIND_IDENTITY:
+        raise ValueError("owner-key rotation requires an Identity Record")
+
+    (
+        legacy_signed_update,
+        legacy_record_fields,
+        legacy_payload,
+        legacy_seq,
+        legacy_record_kind,
+        legacy_owner_public_key,
+    ) = _decode_legacy_state(
+        record_key=record_key,
+        envelope_cbor=legacy_envelope_cbor,
+    )
+    if legacy_record_kind != RECORD_KIND_IDENTITY:
+        raise ValueError("owner-key rotation requires a legacy Identity predecessor")
+    if set(legacy_record_fields) != {1, 2} or legacy_payload:
+        raise ValueError("legacy predecessor is not an Identity Record")
+
+    owner_name = bytes(parsed[3][1])
+    if owner_name != bytes(legacy_record_fields[1]):
+        raise ValueError("owner_name bytes mismatch")
+    if parsed[6] != record_key:
+        raise ValueError("lookup-key mismatch")
+    if parsed[5] != legacy_seq + 1:
+        raise ValueError("rotation seq must be exactly predecessor seq plus one")
+    if authorization[7] != _sha256(legacy_signed_update):
+        raise ValueError("predecessor state mismatch")
+    if authorization[4] != 1:
+        raise ValueError("legacy owner rotation epoch must be 1")
+    _require_complete_2_of_3(authorization)
+
+    candidate_owner_public_key = bytes(parsed[3][2])
+    if not any(
+        bytes(entry[2]) == candidate_owner_public_key for entry in authorization[6]
+    ):
+        raise ValueError("successor Owner Public Key must be in successor Signer Set")
+    if len(parsed[1].proofs) != 1:
+        raise ValueError("legacy owner rotation requires exactly one proof")
+    proof = parsed[1].proofs[0]
+    if proof[1] is not None:
+        raise ValueError("legacy owner rotation proof signer_id must be null")
+    try:
+        valid = verify_ed25519_signature(
+            owner_public_key=legacy_owner_public_key,
+            signed_update_bytes_canonical=parsed[0],
+            signature=proof[2],
+        )
+    except Exception as exc:
+        raise ValueError("invalid legacy owner rotation proof") from exc
+    if not valid:
+        raise ValueError("invalid legacy owner rotation proof")
+    return _candidate_state(
+        record_key=record_key,
+        parsed=parsed,
+        history=(bytes(legacy_envelope_cbor), bytes(envelope_cbor)),
+    )
+
+
+def _validate_owner_rotation_from_state(
+    *,
+    record_key: bytes,
+    envelope_cbor: bytes,
+    current_state: MultisignatureState,
+    verify_history: bool,
+) -> MultisignatureState:
+    if current_state.record_kind != RECORD_KIND_IDENTITY:
+        raise ValueError("owner-key rotation requires an Identity Record predecessor")
+    if current_state.history is None:
+        raise ValueError("complete predecessor history is required for owner rotation")
+    try:
+        decode_multisignature_envelope(current_state.history[0])
+    except Exception:
+        pass
+    else:
+        raise ValueError("predecessor history must include a signed legacy anchor")
+    if verify_history:
+        verified_state = validate_multisignature_history(
+            record_key=record_key,
+            envelopes=current_state.history,
+        )
+        if (
+            verified_state.state_hash != current_state.state_hash
+            or verified_state.signed_update_bytes != current_state.signed_update_bytes
+        ):
+            raise ValueError("predecessor history does not match current state")
+
+    parsed = _decode_multisignature_candidate(envelope_cbor)
+    authorization = parsed[7]
+    if authorization[3] != OPERATION_OWNER_KEY_ROTATION:
+        raise ValueError("expected owner-key-rotation operation")
+    if authorization[2] != RECORD_KIND_IDENTITY:
+        raise ValueError("owner-key rotation requires an Identity Record")
+
+    predecessor = decode_multisignature_signed_update(
+        current_state.signed_update_bytes
+    )
+    if bytes(parsed[3][1]) != bytes(predecessor[1][1]):
+        raise ValueError("owner_name bytes mismatch")
+    if parsed[6] != record_key or current_state.record_key != record_key:
+        raise ValueError("lookup-key mismatch")
+    if parsed[5] != current_state.seq + 1:
+        raise ValueError("rotation seq must be exactly predecessor seq plus one")
+    if authorization[7] != current_state.state_hash:
+        raise ValueError("predecessor state mismatch")
+    if authorization[4] != current_state.epoch:
+        raise ValueError("rotation epoch must preserve the predecessor epoch")
+    if authorization[5] != current_state.threshold:
+        raise ValueError("rotation threshold must preserve the predecessor threshold")
+    if _signer_tuple(authorization) != current_state.signer_set:
+        raise ValueError("rotation must preserve the predecessor Signer Set")
+    _validate_threshold_proofs(
+        signed_update_bytes=parsed[0],
+        envelope=parsed[1],
+        signer_set=current_state.signer_set,
+        threshold=current_state.threshold,
+    )
+    return _candidate_state(
+        record_key=record_key,
+        parsed=parsed,
+        history=(*current_state.history, bytes(envelope_cbor)),
+    )
+
+
+def validate_multisignature_history(
+    *, record_key: bytes, envelopes: Sequence[bytes]
+) -> MultisignatureState:
+    """Replay an accepted Identity lineage from a signed legacy or genesis anchor."""
+    if (
+        isinstance(envelopes, (bytes, bytearray, str))
+        or not isinstance(envelopes, Sequence)
+        or not envelopes
+    ):
+        raise ValueError("complete predecessor history is required")
+    if any(not isinstance(envelope, (bytes, bytearray)) for envelope in envelopes):
+        raise TypeError("predecessor history entries must be envelope bytes")
+    normalized = tuple(bytes(envelope) for envelope in envelopes)
+
+    current_state: MultisignatureState | None = None
+    legacy_anchor: bytes | None = None
+    try:
+        first_multisig = decode_multisignature_envelope(normalized[0])
+    except Exception:
+        (
+            _legacy_update,
+            legacy_record_fields,
+            legacy_payload,
+            _legacy_seq,
+            legacy_record_kind,
+            _legacy_owner_key,
+        ) = _decode_legacy_state(record_key=record_key, envelope_cbor=normalized[0])
+        if (
+            legacy_record_kind != RECORD_KIND_IDENTITY
+            or set(legacy_record_fields) != {1, 2}
+            or legacy_payload
+        ):
+            raise ValueError("history anchor is not a valid legacy Identity Record")
+        legacy_anchor = normalized[0]
+    else:
+        first_update = decode_multisignature_signed_update(
+            first_multisig.signed_update_bytes
+        )
+        if first_update[4][2] != RECORD_KIND_IDENTITY:
+            raise ValueError("predecessor history is not an Identity Record")
+        if first_update[4][3] != OPERATION_GENESIS:
+            raise ValueError("predecessor history must begin at a signed anchor")
+        current_state = validate_multisignature_genesis(
+            record_key=record_key,
+            envelope_cbor=normalized[0],
+        )
+
+    for envelope_cbor in normalized[1:]:
+        parsed = _decode_multisignature_candidate(envelope_cbor)
+        operation = parsed[7][3]
+        if current_state is None:
+            if legacy_anchor is None:
+                raise ValueError("complete predecessor history is required")
+            if operation == OPERATION_UPGRADE:
+                current_state = validate_multisignature_upgrade(
+                    record_key=record_key,
+                    envelope_cbor=envelope_cbor,
+                    legacy_envelope_cbor=legacy_anchor,
+                )
+            elif operation == OPERATION_OWNER_KEY_ROTATION:
+                current_state = _validate_owner_rotation_from_legacy(
+                    record_key=record_key,
+                    envelope_cbor=envelope_cbor,
+                    legacy_envelope_cbor=legacy_anchor,
+                )
+            else:
+                raise ValueError("legacy anchor must be followed by upgrade or rotation")
+            continue
+
+        if operation == OPERATION_OWNER_KEY_ROTATION:
+            current_state = _validate_owner_rotation_from_state(
+                record_key=record_key,
+                envelope_cbor=envelope_cbor,
+                current_state=current_state,
+                verify_history=False,
+            )
+        else:
+            current_state = validate_multisignature_update(
+                record_key=record_key,
+                envelope_cbor=envelope_cbor,
+                current_state=current_state,
+            )
+
+    if current_state is None:
+        raise ValueError("predecessor history must include a multisignature state")
+    if current_state.history != normalized:
+        raise ValueError("predecessor history is incomplete or inconsistent")
+    return current_state
 
 
 def validate_multisignature_update(
@@ -781,10 +1038,29 @@ def validate_multisignature_update(
             envelope_cbor=envelope_cbor,
             legacy_envelope_cbor=legacy_envelope_cbor,
         )
+    if operation == OPERATION_OWNER_KEY_ROTATION:
+        if current_state is None:
+            if legacy_envelope_cbor is None:
+                raise ValueError(
+                    "verified predecessor state is required for owner-key rotation"
+                )
+            return _validate_owner_rotation_from_legacy(
+                record_key=record_key,
+                envelope_cbor=envelope_cbor,
+                legacy_envelope_cbor=legacy_envelope_cbor,
+            )
+        if legacy_envelope_cbor is not None:
+            raise ValueError("legacy state cannot accompany a multisignature predecessor")
+        return _validate_owner_rotation_from_state(
+            record_key=record_key,
+            envelope_cbor=envelope_cbor,
+            current_state=current_state,
+            verify_history=True,
+        )
     if current_state is None:
         raise ValueError("current multisignature state is required")
     if legacy_envelope_cbor is not None:
-        raise ValueError("legacy state is only valid for an upgrade")
+        raise ValueError("legacy state is only valid for an upgrade or owner rotation")
     if operation == OPERATION_ORDINARY_UPDATE:
         return validate_multisignature_ordinary_update(
             record_key=record_key,

@@ -95,7 +95,7 @@ Each scenario uses these fields:
   8. For a lost or compromised signer, the two remaining signers authorize a complete replacement signer set in one state transition.
 - **Services involved:** Registry and proposed Identity authorization convention.
 - **Sovereignty and privacy properties:** A single lost key does not necessarily prevent updates; collective authorization reduces dependence on one signer. Private-key secrecy remains absolute.
-- **Current-versus-future status:** The canonical version-1 wire format, local CLI Bundle workflow, finalized Identity and Provider Record submission, resolution metadata, explicit legacy upgrade, and signer replacement are implemented and documented in [`multisignature-records.md`](../multisignature-records.md).
+- **Current-versus-future status:** The canonical version-1 wire format, local CLI Bundle workflow, finalized Identity and Provider Record submission, resolution metadata, explicit legacy upgrade, signer replacement, and Registry-side Identity owner-key rotation acceptance are implemented and documented in [`multisignature-records.md`](../multisignature-records.md). Wallet private-key rotation dispatch, consent, and publication confirmation are not implemented; Registry acceptance alone is not wallet confirmation.
 - **Limitations:** Two lost or compromised signers cannot be recovered through ordinary 2-of-3 authorization. Separate recovery policy, FROST, deployment, availability, privacy, and application tooling remain future work.
 
 ### 7. Build a cross-domain application

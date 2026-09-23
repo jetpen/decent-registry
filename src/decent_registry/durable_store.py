@@ -113,6 +113,10 @@ class LMDBDatastore:
     def _metadata_key(*, kind: Literal["provider", "identity"], key: bytes) -> bytes:
         return kind.encode("ascii") + b"\\x00" + bytes(key)
 
+    @classmethod
+    def _history_key(cls, *, kind: Literal["provider", "identity"], key: bytes) -> bytes:
+        return b"history:" + cls._metadata_key(kind=kind, key=key)
+
     @staticmethod
     def _extract_seq(value: bytes) -> int | None:
         try:
@@ -148,6 +152,30 @@ class LMDBDatastore:
         with self._env.begin(write=False, db=db) as txn:
             return txn.get(key)
 
+    def get_history(
+        self, *, kind: Literal["provider", "identity"], key: bytes
+    ) -> tuple[bytes, ...] | None:
+        self.open()
+        assert self._env is not None
+        assert self._accepted_db is not None
+        history_key = self._history_key(kind=kind, key=key)
+        with self._env.begin(write=False, db=self._accepted_db) as txn:
+            encoded = txn.get(history_key)
+        if encoded is None:
+            return None
+        try:
+            history = cbor2.loads(encoded)
+            if (
+                cbor2.dumps(history, canonical=True) != encoded
+                or not isinstance(history, list)
+                or not history
+                or any(not isinstance(item, bytes) for item in history)
+            ):
+                return None
+        except Exception:
+            return None
+        return tuple(history)
+
     def put_if_newer(
         self,
         *,
@@ -156,6 +184,7 @@ class LMDBDatastore:
         value: bytes,
         seq: int,
         state_hash: bytes,
+        history: tuple[bytes, ...] | None = None,
     ) -> bool:
         """Atomically install a strictly newer accepted envelope.
 
@@ -169,6 +198,12 @@ class LMDBDatastore:
             raise TypeError("value must be bytes")
         if not isinstance(state_hash, (bytes, bytearray)) or len(state_hash) != 32:
             raise ValueError("state_hash must be exactly 32 bytes")
+        if history is not None and (
+            not isinstance(history, (tuple, list))
+            or not history
+            or any(not isinstance(item, (bytes, bytearray)) for item in history)
+        ):
+            raise ValueError("history must be a non-empty sequence of byte envelopes")
 
         self.open()
         assert self._env is not None
@@ -178,7 +213,13 @@ class LMDBDatastore:
 
         db = self._provider_db if kind == "provider" else self._identity_db
         metadata_key = self._metadata_key(kind=kind, key=key)
+        history_key = self._history_key(kind=kind, key=key)
         metadata = cbor2.dumps({1: seq, 2: bytes(state_hash)}, canonical=True)
+        encoded_history = (
+            None
+            if history is None
+            else cbor2.dumps([bytes(item) for item in history], canonical=True)
+        )
 
         with self._env.begin(write=True) as txn:
             current = txn.get(key, db=db)
@@ -206,4 +247,8 @@ class LMDBDatastore:
 
             txn.put(key, bytes(value), db=db, overwrite=True)
             txn.put(metadata_key, metadata, db=self._accepted_db, overwrite=True)
+            if encoded_history is None:
+                txn.delete(history_key, db=self._accepted_db)
+            else:
+                txn.put(history_key, encoded_history, db=self._accepted_db, overwrite=True)
             return True

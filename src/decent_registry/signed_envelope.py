@@ -16,7 +16,8 @@ _PROOF_KEYS = {1, 2}
 
 
 def _proof_sort_key(proof: Mapping[int, Any]) -> bytes:
-    return proof[1].encode("utf-8")
+    signer_id = proof[1]
+    return b"" if signer_id is None else signer_id.encode("utf-8")
 
 
 def _validate_proofs(
@@ -26,15 +27,15 @@ def _validate_proofs(
         raise TypeError("proofs must be a CBOR array")
 
     normalized: list[dict[int, Any]] = []
-    seen: set[str] = set()
+    seen: set[str | None] = set()
     for proof in proofs:
         if not isinstance(proof, dict) or set(proof) != _PROOF_KEYS:
             raise ValueError("proof must be a map with keys {1,2}")
         signer_id = proof[1]
         signature = proof[2]
-        if not isinstance(signer_id, str) or not signer_id:
+        if signer_id is not None and (not isinstance(signer_id, str) or not signer_id):
             raise ValueError("proof signer_id must be a non-empty text string")
-        if len(signer_id.encode("utf-8")) > 256:
+        if isinstance(signer_id, str) and len(signer_id.encode("utf-8")) > 256:
             raise ValueError("proof signer_id must be at most 256 UTF-8 bytes")
         if signer_id in seen:
             raise ValueError("duplicate proof signer identifier")

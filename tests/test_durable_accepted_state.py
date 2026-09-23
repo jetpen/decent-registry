@@ -77,3 +77,43 @@ def test_accepted_state_metadata_survives_restart(tmp_path: Path) -> None:
             state_hash=b"b" * 32,
         )
         assert store.get(kind="provider", key=b"object") == b"state-2"
+
+
+def test_identity_predecessor_history_is_atomic_and_survives_restart(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "identity-history.lmdb"
+    key = b"identity-key"
+    first_history = (b"legacy-anchor", b"rotation-1")
+    next_history = (*first_history, b"rotation-2")
+    with LMDBDatastore(path=path, mapsize_bytes=1024 * 1024) as store:
+        assert store.put_if_newer(
+            kind="identity",
+            key=key,
+            value=b"rotation-1",
+            seq=2,
+            state_hash=b"a" * 32,
+            history=first_history,
+        )
+        assert store.get_history(kind="identity", key=key) == first_history
+        assert not store.put_if_newer(
+            kind="identity",
+            key=key,
+            value=b"stale",
+            seq=1,
+            state_hash=b"b" * 32,
+            history=(b"tampered", b"stale"),
+        )
+        assert store.get_history(kind="identity", key=key) == first_history
+
+    with LMDBDatastore(path=path, mapsize_bytes=1024 * 1024) as store:
+        assert store.get_history(kind="identity", key=key) == first_history
+        assert store.put_if_newer(
+            kind="identity",
+            key=key,
+            value=b"rotation-2",
+            seq=3,
+            state_hash=b"c" * 32,
+            history=next_history,
+        )
+        assert store.get_history(kind="identity", key=key) == next_history

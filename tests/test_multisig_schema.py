@@ -6,6 +6,7 @@ import pytest
 from decent_registry.encoding import (
     AUTHORIZATION_SCHEME_ED25519,
     OPERATION_ORDINARY_UPDATE,
+    OPERATION_OWNER_KEY_ROTATION,
     RECORD_KIND_IDENTITY,
     RECORD_KIND_PROVIDER,
     decode_multisignature_signed_update,
@@ -480,3 +481,28 @@ def test_empty_proof_collection_is_valid_for_a_draft():
         proofs=[],
     )
     assert decode_multisignature_envelope(envelope).proofs == ()
+
+
+def test_owner_rotation_null_signer_proof_has_canonical_empty_sort_key():
+    auth = authorization()
+    auth[3] = OPERATION_OWNER_KEY_ROTATION
+    signed_update = encode_signed_update(
+        record_fields={1: b"owner-name", 2: KEY_A},
+        payload={},
+        seq=9,
+        authorization=auth,
+    )
+    envelope = encode_multisignature_envelope(
+        signed_update_bytes=signed_update,
+        proofs=[{1: "owner", 2: SIG_A}, {1: None, 2: SIG_B}],
+    )
+
+    decoded = decode_multisignature_envelope(envelope)
+    assert decoded.proofs == ({1: None, 2: SIG_B}, {1: "owner", 2: SIG_A})
+
+    with pytest.raises(ValueError, match="canonically ordered"):
+        encode_multisignature_envelope(
+            signed_update_bytes=signed_update,
+            proofs=[{1: "owner", 2: SIG_A}, {1: None, 2: SIG_B}],
+            sort_proofs=False,
+        )
