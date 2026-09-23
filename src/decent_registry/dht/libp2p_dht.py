@@ -228,6 +228,27 @@ class Libp2pKadDHT:
             return None
         return get_history(kind=kind, key=key)  # type: ignore[arg-type]
 
+    @staticmethod
+    def _accepted_state_put_kwargs(
+        *,
+        kind: str,
+        key: bytes,
+        value: bytes,
+        seq: int,
+        state_hash: bytes,
+        history: tuple[bytes, ...] | None = None,
+    ) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "kind": kind,
+            "key": key,
+            "value": value,
+            "seq": seq,
+            "state_hash": state_hash,
+        }
+        if kind == "identity":
+            kwargs["history"] = history
+        return kwargs
+
     def _durable_install(
         self, *, kind: str, key: bytes, value: bytes, result: Any
     ) -> None:
@@ -249,16 +270,15 @@ class Libp2pKadDHT:
         if put_if_newer is None:
             self._durable_store.put(kind=kind, key=key, value=value)  # type: ignore[arg-type]
             return
-        kwargs = {
-            "kind": kind,
-            "key": key,
-            "value": value,
-            "seq": seq,
-            "state_hash": state_hash,
-        }
         state = getattr(result, "state", None)
-        if kind == "identity":
-            kwargs["history"] = getattr(state, "history", None)
+        kwargs = self._accepted_state_put_kwargs(
+            kind=kind,
+            key=key,
+            value=value,
+            seq=seq,
+            state_hash=state_hash,
+            history=getattr(state, "history", None),
+        )
         if not put_if_newer(**kwargs):
             raise ValueError("stale or conflicting accepted state")
 
@@ -278,15 +298,14 @@ class Libp2pKadDHT:
         if put_if_newer is None:
             self._durable_store.put(kind=kind, key=key, value=value)  # type: ignore[arg-type]
             return
-        kwargs = {
-            "kind": kind,
-            "key": key,
-            "value": value,
-            "seq": seq,
-            "state_hash": state_hash,
-        }
-        if kind == "identity":
-            kwargs["history"] = history
+        kwargs = self._accepted_state_put_kwargs(
+            kind=kind,
+            key=key,
+            value=value,
+            seq=seq,
+            state_hash=state_hash,
+            history=history,
+        )
         put_if_newer(**kwargs)
 
     async def _read_dht_value(self, kad_key: str, *, quorum: int = 0) -> bytes | None:

@@ -34,7 +34,7 @@ _Avoid_: Hash
 **Seq**: A non-negative integer that orders overwrites for a given record key. Later overwrites must have strictly larger Seq.
 _Avoid_: Version, nonce
 
-**Owner Binding**: The rule that the first accepted SignedUpdate for a record key commits that record key to a specific Owner Public Key; later overwrites must use the same Owner Public Key.
+**Owner Binding**: The rule that the first accepted SignedUpdate for a record key commits that record key to a specific Owner Public Key; later overwrites preserve it except through a validated Owner-Key Rotation.
 _Avoid_: Ownership, key binding
 
 **Canonical CBOR**: Deterministic CBOR encoding required so the bytes that are signed/verified are reproducible.
@@ -78,5 +78,5 @@ _Avoid_: censorship-proof
 
 ## Rules
 
-- **Overwrite rules**: For a fixed DHT key, later updates are accepted only if the SignedUpdate is valid, the signature verifies, Seq strictly increases, and Owner Binding is consistent.
+- **Overwrite rules**: For a fixed DHT key, later updates require a valid SignedUpdate and signature, strictly increasing Seq, and consistent Owner Binding; only a validated operation-5 Owner-Key Rotation may change the bound Owner Public Key.
 - **Key mismatch rejection**: Updates are rejected when the derived lookup key does not match the record key being overwritten.
