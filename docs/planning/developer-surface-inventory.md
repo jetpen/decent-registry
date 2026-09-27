@@ -93,6 +93,12 @@ The protocol concepts are defined in [protocol-concepts.md](../protocol-concepts
   orchestration surface for registry operations.
 - [record_validator.py](../../src/decent_registry/record_validator.py) validates record
   structure and update rules.
+- `RegistryService.get_identity_envelope(...)` returns exact validated current envelope
+  bytes; `get_identity_envelope_by_hash(...)` reads only this node's retained accepted
+  Identity history and is not a DHT-wide history index.
+- `RegistryService.put_identity_envelope_if_current(...)` requires a non-null expected state
+  hash, checks it and expiry per instance, and rejects conditional creates because DHT `None`
+  cannot prove absence; it is not a cross-node compare-and-swap.
 - Implemented validation requires strict `Seq` increases for accepted updates.
 - Implemented validation enforces owner binding.
 - Provider URLs are validated and multiaddr endpoints are sorted as part of the provider

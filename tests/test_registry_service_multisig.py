@@ -15,7 +15,6 @@ from decent_registry.multisig_bundle import (
 )
 from decent_registry.registry_service import RegistryService
 
-
 OWNER_NAME = b"service-owner"
 OBJECT_HASH = hashlib.sha256(b"service-object").hexdigest()
 
@@ -41,8 +40,13 @@ class FakeDHT:
     def __init__(self) -> None:
         self.provider_puts: list[tuple[str, bytes]] = []
         self.identity_puts: list[tuple[str, bytes]] = []
+        self.identity_conditional_puts: list[tuple[str, bytes, bytes, int]] = []
         self.provider_result: Any = None
         self.identity_result: Any = None
+        self.identity_envelope_result: bytes | None = None
+        self.identity_envelope_calls: list[tuple[str, int]] = []
+        self.identity_envelope_by_hash_result: bytes | None = None
+        self.identity_envelope_by_hash_calls: list[tuple[str, bytes]] = []
         self.identity_confirmation_result: Any = None
         self.identity_confirmation_calls: list[tuple[str, bytes]] = []
 
@@ -52,11 +56,35 @@ class FakeDHT:
     async def put_signed_identity_record(self, object_key_hex: str, envelope_cbor: bytes) -> None:
         self.identity_puts.append((object_key_hex, envelope_cbor))
 
+    async def put_signed_identity_record_if_current(
+        self,
+        object_key_hex: str,
+        envelope_cbor: bytes,
+        *,
+        expected_state_hash: bytes,
+        expires_at: int,
+    ) -> None:
+        self.identity_conditional_puts.append(
+            (object_key_hex, envelope_cbor, expected_state_hash, expires_at)
+        )
+
     async def get_signed_provider_record(self, object_hash: str, quorum: int = 0) -> Any:
         return self.provider_result
 
     async def get_signed_identity_record(self, object_key_hex: str, quorum: int = 0) -> Any:
         return self.identity_result
+
+    async def get_identity_envelope(
+        self, object_key_hex: str, quorum: int = 0
+    ) -> bytes | None:
+        self.identity_envelope_calls.append((object_key_hex, quorum))
+        return self.identity_envelope_result
+
+    async def get_identity_envelope_by_hash(
+        self, object_key_hex: str, state_hash: bytes
+    ) -> bytes | None:
+        self.identity_envelope_by_hash_calls.append((object_key_hex, state_hash))
+        return self.identity_envelope_by_hash_result
 
     async def confirm_identity_owner_key_rotation(
         self, *, owner_name_hex: str, expected_envelope_cbor: bytes
@@ -127,6 +155,90 @@ def test_registry_service_get_preserves_typed_results_and_quorum():
 
     assert provider is dht.provider_result
     assert identity is dht.identity_result
+
+
+def test_registry_service_get_identity_envelope_derives_the_registry_key():
+    dht = FakeDHT()
+    dht.identity_envelope_result = b"exact-public-envelope"
+    service = RegistryService(dht=dht)
+
+    import asyncio
+
+    result = asyncio.run(
+        service.get_identity_envelope(owner_name_hex=OWNER_NAME.hex(), quorum=2)
+    )
+
+    assert result == dht.identity_envelope_result
+    assert dht.identity_envelope_calls == [
+        (hashlib.sha256(OWNER_NAME).hexdigest(), 2)
+    ]
+
+
+def test_registry_service_get_identity_envelope_by_hash_uses_owner_name_key():
+    dht = FakeDHT()
+    dht.identity_envelope_by_hash_result = b"retained-predecessor"
+    service = RegistryService(dht=dht)
+    state_hash = hashlib.sha256(b"signed-update").digest()
+
+    import asyncio
+
+    result = asyncio.run(
+        service.get_identity_envelope_by_hash(
+            owner_name_hex=OWNER_NAME.hex(), state_hash=state_hash
+        )
+    )
+
+    assert result == dht.identity_envelope_by_hash_result
+    assert dht.identity_envelope_by_hash_calls == [
+        (hashlib.sha256(OWNER_NAME).hexdigest(), state_hash)
+    ]
+
+
+def test_registry_service_conditional_put_preserves_expected_state_and_expiry():
+    dht = FakeDHT()
+    service = RegistryService(dht=dht)
+    envelope = b"finalized-public-envelope"
+    expected_state_hash = hashlib.sha256(b"predecessor-update").digest()
+    expires_at = 2_000_000_000
+
+    import asyncio
+
+    asyncio.run(
+        service.put_identity_envelope_if_current(
+            owner_name_hex=OWNER_NAME.hex(),
+            envelope_cbor=envelope,
+            expected_state_hash=expected_state_hash,
+            expires_at=expires_at,
+        )
+    )
+
+    assert dht.identity_conditional_puts == [
+        (
+            hashlib.sha256(OWNER_NAME).hexdigest(),
+            envelope,
+            expected_state_hash,
+            expires_at,
+        )
+    ]
+
+
+def test_registry_service_conditional_put_rejects_unprovable_absence():
+    dht = FakeDHT()
+    service = RegistryService(dht=dht)
+
+    import asyncio
+
+    with pytest.raises(ValueError, match="absent"):
+        asyncio.run(
+            service.put_identity_envelope_if_current(
+                owner_name_hex=OWNER_NAME.hex(),
+                envelope_cbor=b"candidate",
+                expected_state_hash=None,
+                expires_at=2_000_000_000,
+            )
+        )
+
+    assert dht.identity_conditional_puts == []
 
 
 def test_registry_service_owner_rotation_confirmation_uses_validated_dht_result():
