@@ -8,6 +8,7 @@ from decent_registry.envelope_builder import (
     build_identity_envelope,
     build_provider_envelope,
 )
+from decent_registry.exceptions import IdentityStatePreconditionFailed
 from decent_registry.provider_schema import ProviderPayloadV1
 from decent_registry.record_validator import IdentityRecordResult, ProviderRecordResult
 
@@ -25,9 +26,27 @@ class RegistryDHT(Protocol):
         self, object_key_hex: str, envelope_cbor: bytes
     ) -> None: ...
 
+    async def put_signed_identity_record_if_current(
+        self,
+        object_key_hex: str,
+        envelope_cbor: bytes,
+        *,
+        expected_state_hash: bytes,
+        expires_at: int,
+    ) -> None: ...
+
     async def get_signed_identity_record(
         self, object_key_hex: str, quorum: int = 0
     ) -> dict[str, Any] | IdentityRecordResult | None: ...
+
+    async def get_identity_envelope(
+        self, object_key_hex: str, quorum: int = 0
+    ) -> bytes | None: ...
+
+    async def get_identity_envelope_by_hash(
+        self, object_key_hex: str, state_hash: bytes
+    ) -> bytes | None: ...
+
 
     async def confirm_identity_owner_key_rotation(
         self, *, owner_name_hex: str, expected_envelope_cbor: bytes
@@ -165,6 +184,35 @@ class RegistryService:
         )
         await self.dht.put_signed_identity_record(object_key_hex, envelope_cbor)
 
+    async def put_identity_envelope_if_current(
+        self,
+        *,
+        owner_name_hex: str,
+        envelope_cbor: bytes,
+        expected_state_hash: bytes,
+        expires_at: int,
+    ) -> None:
+        """Conditionally publish against one Registry instance's existing head.
+
+        A non-null 32-byte state hash is required. DHT ``None`` reads cannot
+        distinguish an absent key from an inconclusive lookup.
+        """
+        if expected_state_hash is None:
+            raise IdentityStatePreconditionFailed(
+                "DHT reads cannot prove that the Identity key is absent"
+            )
+        if not isinstance(expected_state_hash, bytes) or len(expected_state_hash) != 32:
+            raise ValueError("expected_state_hash must be exactly 32 bytes")
+        object_key_hex = _derive_identity_object_hash_from_owner_name_hex(
+            owner_name_hex
+        )
+        await self.dht.put_signed_identity_record_if_current(
+            object_key_hex,
+            envelope_cbor,
+            expected_state_hash=expected_state_hash,
+            expires_at=expires_at,
+        )
+
     async def put_identity_multisig(
         self, *, owner_name_hex: str, envelope_cbor: bytes
     ) -> None:
@@ -182,6 +230,27 @@ class RegistryService:
     ) -> dict[str, Any] | IdentityRecordResult | None:
         object_key_hex = _derive_identity_object_hash_from_owner_name_hex(owner_name_hex)
         return await self.dht.get_signed_identity_record(object_key_hex, quorum=quorum)
+
+    async def get_identity_envelope(
+        self,
+        *,
+        owner_name_hex: str,
+        quorum: int = 0,
+    ) -> bytes | None:
+        """Return exact raw bytes for the Registry-validated current Identity Record."""
+        object_key_hex = _derive_identity_object_hash_from_owner_name_hex(owner_name_hex)
+        return await self.dht.get_identity_envelope(object_key_hex, quorum=quorum)
+
+    async def get_identity_envelope_by_hash(
+        self,
+        *,
+        owner_name_hex: str,
+        state_hash: bytes,
+    ) -> bytes | None:
+        """Return an envelope by state hash from local accepted Identity history."""
+        object_key_hex = _derive_identity_object_hash_from_owner_name_hex(owner_name_hex)
+        return await self.dht.get_identity_envelope_by_hash(object_key_hex, state_hash)
+
 
     async def confirm_identity_owner_key_rotation(
         self, *, owner_name_hex: str, expected_envelope_cbor: bytes

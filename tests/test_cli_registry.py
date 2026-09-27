@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import queue
+import shutil
 import socket
 import subprocess
 import threading
@@ -9,7 +10,6 @@ import time
 
 import pytest
 import trio
-import shutil
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import (
@@ -17,10 +17,10 @@ from cryptography.hazmat.primitives.serialization import (
     NoEncryption,
     PrivateFormat,
 )
+from libp2p.crypto.ed25519 import create_new_key_pair
 
 from decent_registry.crypto_utils import load_ed25519_keypair_from_privkey_pem_path
 from decent_registry.dht.libp2p_dht import Libp2pKadDHT
-from libp2p.crypto.ed25519 import create_new_key_pair
 
 
 def _free_port() -> int:
@@ -273,11 +273,14 @@ def test_cli_identity_put_get_round_trip_libp2p_kad_dht(tmp_path):
     owner_name_bytes = b"owner-name-1"
     owner_name_hex = owner_name_bytes.hex()
     expected_object_key = hashlib.sha256(owner_name_bytes).hexdigest()
+    datastore_path = str(tmp_path / "identity-roundtrip.lmdb")
 
     put_res = _run_cli(
         [
             "put",
             "identity",
+            "--datastore-path",
+            datastore_path,
             "--host",
             "127.0.0.1",
             "--port",
@@ -298,6 +301,8 @@ def test_cli_identity_put_get_round_trip_libp2p_kad_dht(tmp_path):
         [
             "get",
             "identity",
+            "--datastore-path",
+            datastore_path,
             "--host",
             "127.0.0.1",
             "--port",
@@ -325,11 +330,14 @@ def test_cli_identity_seq_monotonic_overwrite_rejected(tmp_path):
 
     owner_name_bytes = b"owner-name-2"
     owner_name_hex = owner_name_bytes.hex()
+    datastore_path = str(tmp_path / "identity-monotonic.lmdb")
 
     put1 = _run_cli(
         [
             "put",
             "identity",
+            "--datastore-path",
+            datastore_path,
             "--host",
             "127.0.0.1",
             "--port",
@@ -350,6 +358,8 @@ def test_cli_identity_seq_monotonic_overwrite_rejected(tmp_path):
         [
             "put",
             "identity",
+            "--datastore-path",
+            datastore_path,
             "--host",
             "127.0.0.1",
             "--port",
@@ -370,6 +380,8 @@ def test_cli_identity_seq_monotonic_overwrite_rejected(tmp_path):
         [
             "get",
             "identity",
+            "--datastore-path",
+            datastore_path,
             "--host",
             "127.0.0.1",
             "--port",
