@@ -28,15 +28,20 @@ from decent_registry.exceptions import (
     IdentityPublicationExpired,
     IdentityStatePreconditionFailed,
     IdentityStateUnavailable,
+    ProviderStateConflict,
+    ProviderStateUnavailable,
+    ProviderAlreadyWithdrawn,
 )
 from decent_registry.provider_schema import (
     ProviderPayloadV1,
+    ProviderWithdrawnPayloadV2,
     decode_provider_payload_dict,
 )
 from decent_registry.record_validator import (
     IdentityRecordResult,
     ProviderOverwriteResult,
     ProviderRecordResult,
+    ProviderWithdrawnResult,
     RecordValidator,
 )
 from decent_registry.signed_envelope import (
@@ -84,6 +89,22 @@ def _is_multisignature_envelope(envelope_cbor: bytes | None) -> bool:
     except Exception:
         return False
     return isinstance(decoded, dict) and set(decoded) == {1, 2, 3}
+
+
+def _is_provider_withdrawal_envelope(envelope_cbor: bytes | None) -> bool:
+    if envelope_cbor is None:
+        return False
+    try:
+        if _is_multisignature_envelope(envelope_cbor):
+            update_bytes = decode_multisignature_envelope(envelope_cbor).signed_update_bytes
+        else:
+            update_bytes, _ = decode_signed_envelope(envelope_cbor)
+        update = decode_canonical_signed_update(update_bytes)
+        return isinstance(
+            decode_provider_payload_dict(update[2]), ProviderWithdrawnPayloadV2
+        )
+    except Exception:
+        return False
 
 
 def _identity_predecessor_state_hash(envelope_cbor: bytes) -> bytes | None:
@@ -434,6 +455,9 @@ class Libp2pKadDHT:
             _is_multisignature_envelope(envelope_cbor)
             or _is_multisignature_envelope(raw_dht)
             or _is_multisignature_envelope(raw_local)
+            or _is_provider_withdrawal_envelope(envelope_cbor)
+            or _is_provider_withdrawal_envelope(raw_dht)
+            or _is_provider_withdrawal_envelope(raw_local)
         )
         raw_existing = (
             _select_newest_envelope(raw_dht, raw_local)
@@ -558,12 +582,27 @@ class Libp2pKadDHT:
         kind, record_key, envelope, result = accepted
         if self._durable_get(kind=kind, key=record_key) == envelope:
             return
-        if kind == "identity" or _is_multisignature_envelope(envelope):
+        if (
+            kind == "identity"
+            or _is_multisignature_envelope(envelope)
+            or isinstance(result, ProviderWithdrawnResult)
+        ):
+            history = None
+            if kind == "provider" and isinstance(result, ProviderWithdrawnResult):
+                prior = result.predecessor_envelope_cbor
+                if prior is None:
+                    raise ValueError("Provider tombstone acceptance requires predecessor evidence")
+                previous_history = self._durable_history(kind=kind, key=record_key)
+                if previous_history and previous_history[-1] == prior:
+                    history = (*previous_history, envelope)
+                else:
+                    history = (prior, envelope)
             self._durable_install(
                 kind=kind,
                 key=record_key,
                 value=envelope,
                 result=result,
+                history=history,
             )
         else:
             self._durable_store.put(kind=kind, key=record_key, value=envelope)
@@ -638,6 +677,8 @@ class Libp2pKadDHT:
         }
         if kind == "identity":
             kwargs["history"] = history
+        elif history is not None:
+            kwargs["history"] = history
         return kwargs
 
     def _require_durable_identity_history(self, result: Any) -> None:
@@ -653,7 +694,8 @@ class Libp2pKadDHT:
             raise ValueError("owner-key rotation requires durable predecessor history")
 
     def _durable_install(
-        self, *, kind: str, key: bytes, value: bytes, result: Any
+        self, *, kind: str, key: bytes, value: bytes, result: Any,
+        history: tuple[bytes, ...] | None = None,
     ) -> None:
         if kind == "identity":
             self._require_durable_identity_history(result)
@@ -673,7 +715,11 @@ class Libp2pKadDHT:
             value=value,
             seq=seq,
             state_hash=state_hash,
-            history=getattr(state, "history", None),
+            history=(
+                getattr(state, "history", None)
+                if kind == "identity"
+                else history
+            ),
         )
         if not put_if_newer(**kwargs):
             if self._durable_get(kind=kind, key=key) == value:
@@ -725,18 +771,60 @@ class Libp2pKadDHT:
                 _is_multisignature_envelope(envelope_cbor)
                 or _is_multisignature_envelope(raw_dht)
                 or _is_multisignature_envelope(raw_local)
+                or _is_provider_withdrawal_envelope(envelope_cbor)
+                or _is_provider_withdrawal_envelope(raw_dht)
+                or _is_provider_withdrawal_envelope(raw_local)
             )
             if not use_accepted_state:
+                if (
+                    _is_provider_withdrawal_envelope(envelope_cbor)
+                    and self._durable_store is not None
+                ):
+                    if raw_local is None or raw_dht is None:
+                        raise ProviderStateUnavailable(
+                            "cannot prove the current Provider head from DHT and durable state"
+                        )
+                    try:
+                        _select_newest_envelope(raw_dht, raw_local)
+                    except Exception as exc:
+                        raise ProviderStateConflict(
+                            "conflicting current Provider Record heads"
+                        ) from exc
                 result = self._validator.validate_provider_overwrite(
                     record_key=record_key,
                     envelope_cbor=envelope_cbor,
                     existing_envelope_cbor=raw_dht,
                 )
+                if isinstance(result, ProviderWithdrawnResult):
+                    if raw_dht is None:
+                        raise ProviderStateUnavailable("active DHT predecessor state is unavailable")
+                    existing_update_bytes, _ = decode_signed_envelope(raw_dht)
+                    existing_update = decode_canonical_signed_update(
+                        existing_update_bytes
+                    )
+                    if isinstance(
+                        decode_provider_payload_dict(existing_update[2]),
+                        ProviderWithdrawnPayloadV2,
+                    ):
+                        raise ProviderAlreadyWithdrawn(
+                            "Provider Record is already withdrawn"
+                        )
                 await self._publish_dht_value(kad_key, envelope_cbor)
                 if self._durable_store is not None:
-                    self._durable_store.put(
-                        kind="provider", key=record_key, value=envelope_cbor
-                    )
+                    if isinstance(result, ProviderWithdrawnResult):
+                        self._durable_install(
+                            kind="provider", key=record_key, value=envelope_cbor,
+                            result=result,
+                            history=(
+                                (raw_dht, envelope_cbor)
+                                if raw_dht is not None
+                                else None
+                            ),
+                        )
+                    else:
+                        self._durable_store.put(
+                            kind="provider", key=record_key, value=envelope_cbor
+                        )
                 return
 
             raw_existing = _select_newest_envelope(raw_dht, raw_local)
@@ -745,7 +833,35 @@ class Libp2pKadDHT:
                 envelope_cbor=envelope_cbor,
                 existing_envelope_cbor=raw_existing,
             )
-            if _is_multisignature_envelope(envelope_cbor):
+            if isinstance(result, ProviderWithdrawnResult) and raw_existing is not None:
+                predecessor_history = self._durable_history(
+                    kind="provider", key=record_key
+                )
+                if not predecessor_history or predecessor_history[-1] != raw_existing:
+                    predecessor_history = (raw_existing,)
+                if raw_existing in predecessor_history:
+                    predecessor_history = predecessor_history[
+                        : predecessor_history.index(raw_existing) + 1
+                    ]
+                updated_history = (*predecessor_history, envelope_cbor)
+            else:
+                updated_history = None
+            if isinstance(result, ProviderWithdrawnResult):
+                if raw_existing is None:
+                    raise ValueError("a Provider withdrawal requires an active predecessor state")
+                if self._durable_store is not None and raw_local is not None:
+                    local_head = self._durable_get(kind="provider", key=record_key)
+                    if local_head != raw_existing:
+                        raise ProviderStateConflict(
+                            "durable Provider Record head changed before withdrawal"
+                        )
+                self._durable_install(
+                    kind="provider", key=record_key, value=envelope_cbor,
+                    result=result, history=updated_history,
+                )
+                await self._publish_dht_value(kad_key, envelope_cbor)
+                return
+            elif _is_multisignature_envelope(envelope_cbor):
                 self._durable_install(
                     kind="provider", key=record_key, value=envelope_cbor, result=result
                 )
@@ -1292,24 +1408,70 @@ class Libp2pKadDHT:
             "seq": int(result.seq),
         }
 
+    async def get_signed_provider_envelope(
+        self, object_hash: str, quorum: int = 0
+    ) -> bytes | None:
+        """Return the selected current raw Provider SignedEnvelope, if available."""
+        try:
+            record_key = bytes.fromhex(object_hash)
+        except ValueError:
+            raise ValueError("object_hash must be valid hex") from None
+        if len(record_key) != 32:
+            raise ValueError("object_hash must be 64 hex characters")
+        kad_key = self._kad_key(record_key.hex())
+        async with self._accepted_lock:
+            raw_dht = await self._read_dht_value(kad_key, quorum=quorum)
+            raw_local = self._durable_get(kind="provider", key=record_key)
+            try:
+                return _select_newest_envelope(raw_dht, raw_local)
+            except Exception as exc:
+                raise ProviderStateConflict("conflicting current Provider Record heads") from exc
+
     async def get_signed_provider_record(
         self, object_hash: str, quorum: int = 0
-    ) -> ProviderPayloadV1 | ProviderRecordResult | None:
+    ) -> ProviderPayloadV1 | ProviderWithdrawnResult | ProviderRecordResult | None:
         record_key = bytes.fromhex(object_hash)
         kad_key = self._kad_key(object_hash)
         raw_dht = await self._read_dht_value(kad_key, quorum=quorum)
         raw_local = self._durable_get(kind="provider", key=record_key)
-        raw_current = _select_newest_envelope(raw_dht, raw_local)
+        try:
+            raw_current = _select_newest_envelope(raw_dht, raw_local)
+        except Exception as exc:
+            raise ProviderStateConflict("conflicting current Provider Record heads") from exc
         if raw_current is None:
             return None
         try:
+            signed_update_bytes = (
+                decode_multisignature_envelope(raw_current).signed_update_bytes
+                if _is_multisignature_envelope(raw_current)
+                else decode_signed_envelope(raw_current)[0]
+            )
+            signed_update = decode_canonical_signed_update(signed_update_bytes)
+            payload = decode_provider_payload_dict(signed_update[2])
+            predecessor = None
+            if isinstance(payload, ProviderWithdrawnPayloadV2):
+                if raw_local is None:
+                    return None
+                if raw_local == raw_current:
+                    history = self._durable_history(kind="provider", key=record_key)
+                    if not history or len(history) < 2 or history[-1] != raw_current:
+                        return None
+                    predecessor = history[-2]
+                else:
+                    predecessor = raw_local
             result = self._validator.validate_provider_get(
-                record_key=record_key, envelope_cbor=raw_current
+                record_key=record_key,
+                envelope_cbor=raw_current,
+                existing_envelope_cbor=predecessor,
             )
         except Exception:
             return None
         if self._durable_store is not None and raw_current == raw_dht:
+            history = None
+            if isinstance(result, ProviderWithdrawnResult):
+                history = self._durable_history(kind="provider", key=record_key)
             self._durable_cache(
-                kind="provider", key=record_key, value=raw_current, result=result
+                kind="provider", key=record_key, value=raw_current,
+                result=result, history=history,
             )
         return result

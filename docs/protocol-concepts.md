@@ -125,12 +125,56 @@ Key derivation and owner binding:
 
 Stored as a SignedUpdate where:
 - `record_fields[1]` = `owner_public_key` bytes (Ed25519 public key bytes)
-- `payload` includes a provider schema with unsigned integer keys:
+- `payload` includes the active v1 provider fields:
   - `1`: `alg` (currently `Ed25519`)
-  - `2`: `version` (uint)
+  - `2`: `version` (`1`)
   - `3`: `object_hash` (64-hex string)
   - `4`: `provider_url` (downloadable object URL, max 2048 UTF-8 bytes)
   - `5`: `endpoints` (list<string>, sorted)
+
+A Provider withdrawal is a distinct v2 tombstone payload with fields `1: alg`,
+`2: 2`, `3: object_hash`, `4: "withdrawn"`, and optional `5:
+replacement_object_hash`. It has no URL or endpoints. The active v1 payload,
+SignedUpdate/envelope shape, and signature purpose remain unchanged.
+
+  #### Provider withdrawal payload v2
+
+  An owner-authorized withdrawal is a Provider payload v2 tombstone at the same
+  `/decent-registry/provider/{object_hash}` key. The active v1 payload and its
+  SignedUpdate signature purpose are unchanged. The canonical tombstone payload
+  contains exactly these fields (key 5 is optional):
+
+  ```text
+  {
+    1: alg,
+    2: 2,
+    3: object_hash,
+    4: "withdrawn",
+    5: replacement_object_hash,  # optional; omit when absent
+  }
+  ```
+
+  It contains no provider URL or endpoints. Hashes are 64 hexadecimal
+  characters, and a replacement cannot point to the withdrawn hash. The
+  replacement is an owner-authored pointer; the Registry does not resolve it or
+  require that it be active or owned by the same key.
+
+  A withdrawal must be a strictly higher-Seq state than a valid active head.
+  Legacy records require the bound Owner Public Key. Multisignature records
+  require the current threshold and exact predecessor-state hash. A higher-Seq
+  active v1 Provider Record can reactivate the key, after which it may be
+  withdrawn again. Repeated withdrawals fail with `ProviderAlreadyWithdrawn`.
+  When the Registry can validate a tombstone, `get provider` returns JSON with
+  `status: "withdrawn"`, `object_key`, `seq`, optional
+  `replacement_object_key`, and multisignature authorization metadata where
+  applicable. Missing records remain `not found`; an unvalidated/conflicting
+  head is not an explicit withdrawn result.
+
+  Withdrawal stops future discovery/use through that Provider Record where the
+  tombstone is observed. It does not delete an external Storage Object, erase
+  Registry history, replicas, caches, or copies already obtained, guarantee
+  immediate/global propagation, or provide cross-node compare-and-swap. No
+  pre-MVP migration or mixed-version deployment guarantee is made.
 
 On get, the client prints:
 - `object_key` (the queried `object_hash` string)

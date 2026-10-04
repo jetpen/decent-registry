@@ -35,6 +35,7 @@ from decent_registry.multisig_bundle import (
     MultisignatureBundle,
     draft_identity_bundle,
     draft_provider_bundle,
+    draft_provider_withdrawal_bundle,
     finalize_bundle,
     merge_proof,
     sign_bundle,
@@ -44,6 +45,7 @@ from libp2p.crypto.keys import KeyPair
 
 from decent_registry.dht.libp2p_dht import Libp2pKadDHT
 from decent_registry.registry_service import RegistryService
+from decent_registry.record_validator import ProviderWithdrawnResult
 from decent_registry.durable_store import LMDBDatastore
 
 logger = logging.getLogger("decent-registry.cli")
@@ -150,20 +152,35 @@ def _bundle_draft_command(args: argparse.Namespace) -> int:
     else:
         object_hash = args.object_hash.lower()
         _parse_hex_value(object_hash, name="object hash", length=32)
-        bundle = draft_provider_bundle(
-            object_hash=object_hash,
-            provider_url=args.provider_url,
-            endpoints=_parse_endpoints(args.endpoint),
-            owner_public_key=owner_public_key,
-            seq=args.seq,
-            signer_set=signer_set,
-            threshold=args.threshold,
-            epoch=args.epoch,
-            predecessor_state_hash=predecessor_state_hash,
-            operation=operation,
-            alg=args.alg,
-            version=args.payload_version,
-        )
+        if getattr(args, "withdrawal", False):
+            bundle = draft_provider_withdrawal_bundle(
+                object_hash=object_hash,
+                owner_public_key=owner_public_key,
+                seq=args.seq,
+                signer_set=signer_set,
+                threshold=args.threshold,
+                epoch=args.epoch,
+                predecessor_state_hash=predecessor_state_hash,
+                replacement_object_hash=args.replacement_object_hash,
+                alg=args.alg,
+            )
+        else:
+            if args.provider_url is None:
+                raise ValueError("Provider draft requires --provider-url unless --withdrawal is set")
+            bundle = draft_provider_bundle(
+                object_hash=object_hash,
+                provider_url=args.provider_url,
+                endpoints=_parse_endpoints(args.endpoint),
+                owner_public_key=owner_public_key,
+                seq=args.seq,
+                signer_set=signer_set,
+                threshold=args.threshold,
+                epoch=args.epoch,
+                predecessor_state_hash=predecessor_state_hash,
+                operation=operation,
+                alg=args.alg,
+                version=args.payload_version,
+            )
     _write_cli_bytes(args.output, bundle.to_cbor(), description="bundle output")
     return 0
 
@@ -454,19 +471,78 @@ def _get_provider_command(args: argparse.Namespace) -> int:
                 print("not found")
                 return 1
 
-            to_dict = getattr(provider_payload, "to_dict", None)
-            if callable(to_dict):
-                payload = to_dict()
+            if isinstance(provider_payload, ProviderWithdrawnResult):
+                payload = provider_payload.to_dict()
             else:
-                payload = {
-                    "object_key": args.object_hash,
-                    "provider_url": provider_payload.provider_url,
-                    "endpoints": provider_payload.endpoints,
-                }
+                to_dict = getattr(provider_payload, "to_dict", None)
+                if callable(to_dict):
+                    payload = to_dict()
+                else:
+                    payload = {
+                        "object_key": args.object_hash,
+                        "provider_url": provider_payload.provider_url,
+                        "endpoints": provider_payload.endpoints,
+                    }
             print(json.dumps(payload, indent=2, sort_keys=True))
             return 0
 
     return trio.run(_async_get)
+
+
+def _withdraw_provider_command(args: argparse.Namespace) -> int:
+    client_cfg = load_client_config(args.config)
+    client_cfg = apply_cli_overrides_to_client(client_cfg, args)
+    client_cfg = resolve_client_config(client_cfg)
+    args.host = client_cfg.network_host
+    args.port = client_cfg.network_port
+    args.bootstrap = client_cfg.network_bootstrap
+    args.datastore_path = client_cfg.datastore_path
+    args.mapsize = client_cfg.mapsize_bytes
+    args.verbose = client_cfg.verbosity
+
+    if args.finalized_envelope is None:
+        if args.seq is None:
+            logger.error("legacy withdrawal requires --seq")
+            return 1
+        args.owner_privkey = resolve_required_owner_privkey_pem_path(client_cfg)
+    elif args.owner_privkey is not None or args.seq is not None or args.replacement_object_hash is not None:
+        logger.error("finalized withdrawal cannot include legacy signing arguments")
+        return 1
+    _configure_logging(client_cfg.verbosity)
+
+    async def _async_withdraw() -> int:
+        seeds = _parse_endpoints(args.bootstrap or [])
+        listen = f"/ip4/{args.host}/tcp/{args.port}"
+        datastore = _make_datastore_from_args(args)
+        async with Libp2pKadDHT(listen=listen, durable_store=datastore) as dht:
+            for seed in seeds:
+                await dht.bootstrap(seed)
+            await trio.sleep(1.0)
+            await RegistryService(dht=dht).withdraw_provider(
+                object_hash=args.object_hash,
+                owner_privkey_pem_path=(
+                    None if args.finalized_envelope is not None else args.owner_privkey
+                ),
+                seq=None if args.finalized_envelope is not None else args.seq,
+                replacement_object_hash=(
+                    None if args.finalized_envelope is not None
+                    else args.replacement_object_hash
+                ),
+                envelope_cbor=(
+                    None
+                    if args.finalized_envelope is None
+                    else _read_cli_bytes(args.finalized_envelope, description="finalized SignedEnvelope")
+                ),
+            )
+            print(1)
+            return 0
+
+    try:
+        return trio.run(_async_withdraw)
+    except Exception:
+        logger.error("withdraw provider failed")
+        print("withdraw failed")
+        return 1
 
 
 def _put_identity_command(args: argparse.Namespace) -> int:
@@ -632,7 +708,9 @@ def main(argv: list[str] | None = None) -> None:
         "provider", help="Draft a Provider Record Multisignature Bundle"
     )
     bundle_draft_provider_p.add_argument("--object-hash", required=True)
-    bundle_draft_provider_p.add_argument("--provider-url", required=True)
+    bundle_draft_provider_p.add_argument("--provider-url", required=False)
+    bundle_draft_provider_p.add_argument("--withdrawal", action="store_true")
+    bundle_draft_provider_p.add_argument("--replacement-object-hash")
     bundle_draft_provider_p.add_argument(
         "--endpoint", action="append", default=[], help="Provider multiaddr"
     )
@@ -768,6 +846,19 @@ def main(argv: list[str] | None = None) -> None:
     _add_datastore_args(get_provider_p)
     get_provider_p.add_argument("--object-hash", dest="object_hash", required=True)
 
+    # withdraw provider
+    withdraw_p = subparsers.add_parser("withdraw", help="Withdraw a signed Provider Record")
+    withdraw_sub = withdraw_p.add_subparsers(dest="record_type", required=True)
+    withdraw_provider_p = withdraw_sub.add_parser("provider", help="Withdraw a Provider Record")
+    withdraw_provider_p.add_argument("--config", default=str(DEFAULT_CLI_CONFIG_PATH))
+    _add_network_args(withdraw_provider_p)
+    _add_datastore_args(withdraw_provider_p)
+    withdraw_provider_p.add_argument("--object-hash", required=True)
+    withdraw_provider_p.add_argument("--owner-privkey", default=None)
+    withdraw_provider_p.add_argument("--seq", type=int, default=None)
+    withdraw_provider_p.add_argument("--replacement-object-hash", default=None)
+    withdraw_provider_p.add_argument("--finalized-envelope", default=None)
+
     get_identity_p = get_sub.add_parser(
         "identity",
         help="Get an identity record by owner name",
@@ -828,5 +919,10 @@ def main(argv: list[str] | None = None) -> None:
         if args.record_type == "identity":
             raise SystemExit(_get_identity_command(args))
         raise SystemExit(f"Unknown get record type: {args.record_type}")
+
+    if args.cmd == "withdraw":
+        if args.record_type == "provider":
+            raise SystemExit(_withdraw_provider_command(args))
+        raise SystemExit(f"Unknown withdraw record type: {args.record_type}")
 
     raise SystemExit(f"Unknown command: {args.cmd}")

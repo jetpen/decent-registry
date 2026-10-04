@@ -159,6 +159,17 @@ decent-registry put identity \
 
 `legacy mode` creates a legacy SignedEnvelope and cannot rotate the Owner Public Key. Finalized mode uses `--finalized-envelope` and accepts versioned multisignature SignedEnvelopes without private-key material. Submit operation-5 Identity rotation through this same option as a prebuilt finalized SignedEnvelope; the `put identity` syntax is unchanged.
 
+### `withdraw`
+
+`decent-registry withdraw provider` publishes an owner-authorized Provider
+Record v2 tombstone at its existing Object Hash key. Legacy mode accepts the
+bound Owner Public Key's `--owner-privkey` and a higher `--seq`; finalized
+multisignature envelopes use `--finalized-envelope`. Optional replacement
+hashes are validated but are not resolved by the Registry. Withdrawal does not
+delete the external object, erase history or copies, or promise global/immediate
+propagation or cross-node compare-and-swap. See
+[`docs/provider-put-get-examples.md`](docs/provider-put-get-examples.md).
+
 ### `get`
 
 Resolves a **signed record** from the DHT.
@@ -180,6 +191,11 @@ On success prints JSON:
 - `provider_url`
 - `endpoints`: normalized/sorted provider endpoints
 - `seq` and `authorization` for version-1 multisignature records; `authorization` includes the Signer Set, threshold, epoch, operation, predecessor-state hash, and accepted state hash
+
+When the selected, valid Provider state is withdrawn, success JSON includes
+`status: "withdrawn"`, `object_key`, `seq`, and optional
+`replacement_object_key`; multisignature authorization metadata is included when
+applicable. An observed withdrawal is distinct from missing or invalid state.
 
 On missing prints `not found` and exits non-zero.
 

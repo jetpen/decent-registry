@@ -6,7 +6,10 @@ from decent_registry.crypto_utils import (
     load_ed25519_keypair_from_privkey_pem_path,
 )
 from decent_registry.encoding import encode_signed_update
-from decent_registry.provider_schema import build_provider_payload_dict
+from decent_registry.provider_schema import (
+    build_provider_payload_dict,
+    build_provider_withdrawal_payload_dict,
+)
 from decent_registry.signed_envelope import encode_signed_envelope
 from decent_registry.verification import make_signed_update_signature
 
@@ -63,6 +66,35 @@ def build_provider_envelope(
     return encode_signed_envelope(
         signed_update_bytes=signed_update_bytes,
         signature=signature,
+    )
+
+
+def build_provider_withdrawal_envelope(
+    *,
+    object_hash: str,
+    owner_privkey_pem_path: str,
+    seq: int,
+    replacement_object_hash: str | None = None,
+    alg: str = "Ed25519",
+) -> bytes:
+    """Build a canonical legacy SignedEnvelope carrying a Provider v2 tombstone."""
+    owner_priv, owner_pub_bytes = load_ed25519_keypair_from_privkey_pem_path(
+        owner_privkey_pem_path
+    )
+    payload = build_provider_withdrawal_payload_dict(
+        alg=alg,
+        object_hash=object_hash,
+        replacement_object_hash=replacement_object_hash,
+    )
+    signed_update_bytes = encode_signed_update(
+        record_fields={1: owner_pub_bytes}, payload=payload, seq=seq
+    )
+    signature = make_signed_update_signature(
+        signed_update_bytes_canonical=signed_update_bytes,
+        owner_private_key=owner_priv,
+    )
+    return encode_signed_envelope(
+        signed_update_bytes=signed_update_bytes, signature=signature
     )
 
 

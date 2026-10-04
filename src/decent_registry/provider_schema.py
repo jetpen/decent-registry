@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
@@ -62,6 +63,15 @@ class ProviderPayloadV1:
     endpoints: list[str]
 
 
+@dataclass(frozen=True, slots=True)
+class ProviderWithdrawnPayloadV2:
+    alg: str
+    version: int
+    object_hash: str
+    status: str
+    replacement_object_hash: str | None = None
+
+
 # CBOR shape for the provider "signed-field list" in issue #23.
 # Encoded as a CBOR map with unsigned integer keys so it fits the
 # SignedUpdate requirement of `payload(map<uint, any>)`.
@@ -72,6 +82,13 @@ _FIELD_VERSION = 2
 _FIELD_OBJECT_HASH = 3
 _FIELD_PROVIDER_URL = 4
 _FIELD_ENDPOINTS = 5
+_OBJECT_HASH_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
+def _validate_object_hash(value: Any, *, name: str) -> str:
+    if not isinstance(value, str) or not _OBJECT_HASH_RE.fullmatch(value):
+        raise ValueError(f"{name} must be exactly 64 hexadecimal characters")
+    return value
 
 
 def build_provider_payload_dict(
@@ -83,11 +100,14 @@ def build_provider_payload_dict(
     endpoints: list[str],
 ) -> dict[int, Any]:
     """Build the in-memory payload dict for the provider signed-field list."""
-    if not isinstance(version, int) or version < 0:
-        raise TypeError("version must be a non-negative int")
+    if isinstance(version, bool) or not isinstance(version, int) or version != 1:
+        raise ValueError("active Provider Record version must be 1")
+    if not isinstance(alg, str) or not alg:
+        raise ValueError("alg must be a non-empty string")
 
     norm_eps = normalize_sorted_endpoints(endpoints)
     provider_url = _validate_object_url(provider_url)
+    object_hash = _validate_object_hash(object_hash, name="object_hash")
 
     return {
         _FIELD_ALG: alg,
@@ -98,11 +118,39 @@ def build_provider_payload_dict(
     }
 
 
-def decode_provider_payload_dict(payload: Mapping[int, Any]) -> ProviderPayloadV1:
+def decode_provider_payload_dict(
+    payload: Mapping[int, Any],
+) -> ProviderPayloadV1 | ProviderWithdrawnPayloadV2:
     if not isinstance(payload, Mapping):
         raise TypeError("payload must be a mapping")
 
     keys = set(payload.keys())
+    version = payload.get(_FIELD_VERSION)
+    if version == 2 and not isinstance(version, bool):
+        required = {1, 2, 3, 4}
+        if not required.issubset(keys) or keys - (required | {5}):
+            raise ValueError("Provider payload v2 has missing or extra fields")
+        alg = payload[1]
+        if not isinstance(alg, str) or not alg:
+            raise ValueError("alg must be a non-empty string")
+        object_hash = _validate_object_hash(payload[3], name="object_hash")
+        if payload[4] != "withdrawn" or not isinstance(payload[4], str):
+            raise ValueError("Provider payload v2 status must be 'withdrawn'")
+        replacement = None
+        if 5 in keys:
+            replacement = _validate_object_hash(
+                payload[5], name="replacement_object_hash"
+            )
+            if bytes.fromhex(replacement) == bytes.fromhex(object_hash):
+                raise ValueError("replacement_object_hash must not reference itself")
+        return ProviderWithdrawnPayloadV2(
+            alg=alg,
+            version=2,
+            object_hash=object_hash,
+            status="withdrawn",
+            replacement_object_hash=replacement,
+        )
+
     if keys != _PROVIDER_PAYLOAD_FIELDS:
         missing = _PROVIDER_PAYLOAD_FIELDS - keys
         extra = keys - _PROVIDER_PAYLOAD_FIELDS
@@ -110,6 +158,17 @@ def decode_provider_payload_dict(payload: Mapping[int, Any]) -> ProviderPayloadV
             f"provider payload keys mismatch; missing={missing} extra={extra}"
         )
 
+    if not isinstance(payload[_FIELD_VERSION], int) or isinstance(
+        payload[_FIELD_VERSION], bool
+    ):
+        raise ValueError("provider version must be an integer")
+    if payload[_FIELD_VERSION] != 1:
+        raise ValueError(
+            f"unsupported provider payload version: {payload[_FIELD_VERSION]}"
+        )
+    alg = payload[_FIELD_ALG]
+    if not isinstance(alg, str) or not alg:
+        raise ValueError("alg must be a non-empty string")
     endpoints = payload[_FIELD_ENDPOINTS]
     if not isinstance(endpoints, list) or not all(
         isinstance(x, str) for x in endpoints
@@ -124,12 +183,50 @@ def decode_provider_payload_dict(payload: Mapping[int, Any]) -> ProviderPayloadV
     provider_url = _validate_object_url(provider_url_raw)
 
     return ProviderPayloadV1(
-        alg=str(payload[_FIELD_ALG]),
+        alg=alg,
         version=int(payload[_FIELD_VERSION]),
-        object_hash=str(payload[_FIELD_OBJECT_HASH]),
+        object_hash=_validate_object_hash(
+            payload[_FIELD_OBJECT_HASH], name="object_hash"
+        ),
         provider_url=provider_url,
         endpoints=endpoints,
     )
+
+
+def build_provider_withdrawal_payload_dict(
+    *, alg: str, object_hash: str, replacement_object_hash: str | None = None
+) -> dict[int, Any]:
+    """Build a v2 signed tombstone payload for an existing Provider Record."""
+    if not isinstance(alg, str) or not alg:
+        raise ValueError("alg must be a non-empty string")
+    object_hash = _validate_object_hash(object_hash, name="object_hash")
+    payload: dict[int, Any] = {1: alg, 2: 2, 3: object_hash, 4: "withdrawn"}
+    if replacement_object_hash is not None:
+        replacement = _validate_object_hash(
+            replacement_object_hash, name="replacement_object_hash"
+        )
+        if bytes.fromhex(replacement) == bytes.fromhex(object_hash):
+            raise ValueError("replacement_object_hash must not reference itself")
+        payload[5] = replacement
+    return payload
+
+
+def encode_provider_withdrawal_payload(
+    *, alg: str, object_hash: str, replacement_object_hash: str | None = None
+) -> bytes:
+    """Canonical CBOR encode of a Provider v2 tombstone payload."""
+    return canonical_cbor(
+        build_provider_withdrawal_payload_dict(
+            alg=alg,
+            object_hash=object_hash,
+            replacement_object_hash=replacement_object_hash,
+        )
+    )
+
+
+def is_provider_withdrawn_payload(payload: Mapping[int, Any]) -> bool:
+    """Return whether a valid Provider payload represents a tombstone."""
+    return isinstance(decode_provider_payload_dict(payload), ProviderWithdrawnPayloadV2)
 
 
 def encode_provider_payload(
@@ -151,7 +248,7 @@ def encode_provider_payload(
     return canonical_cbor(payload_dict)
 
 
-def decode_provider_payload(data: bytes) -> ProviderPayloadV1:
+def decode_provider_payload(data: bytes) -> ProviderPayloadV1 | ProviderWithdrawnPayloadV2:
     # Reject non-canonical encodings: requirement that signatures bind to
     # canonical CBOR.
     if not is_canonical_cbor(data):

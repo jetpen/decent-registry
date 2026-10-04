@@ -188,6 +188,44 @@ def test_cli_bundle_identity_draft_sign_merge_finalize(tmp_path: Path):
     assert resolved.authorization.threshold == 2
 
 
+def test_provider_withdrawal_cli_rejects_mixed_submission_modes(tmp_path: Path):
+    finalized = tmp_path / "tombstone.cbor"
+    finalized.write_bytes(b"not-an-envelope")
+    result = _run_cli([
+        "withdraw", "provider",
+        "--object-hash", "a" * 64,
+        "--owner-privkey", str(tmp_path / "owner.pem"),
+        "--seq", "3",
+        "--finalized-envelope", str(finalized),
+        "--port", "9000",
+        "--datastore-path", str(tmp_path / "withdrawal-cli.lmdb"),
+    ])
+    assert result.returncode != 0
+    assert "cannot include legacy signing arguments" in result.stderr
+
+
+def test_cli_bundle_provider_withdrawal_draft_uses_v2_tombstone(tmp_path: Path):
+    keypairs = [create_new_key_pair() for _ in range(3)]
+    object_hash = "a" * 64
+    output = tmp_path / "provider-withdrawal.cbor"
+    result = _run_cli([
+        "bundle", "draft", "provider", "--withdrawal",
+        "--object-hash", object_hash,
+        "--replacement-object-hash", "b" * 64,
+        "--owner-public-key", keypairs[0].public_key.to_bytes().hex(),
+        "--seq", "2",
+        *_signer_args(keypairs),
+        "--output", str(output),
+    ])
+    assert result.returncode == 0, f"withdrawal draft failed: {result.stdout} {result.stderr}"
+    bundle = MultisignatureBundle.from_cbor(output.read_bytes())
+    assert bundle.signed_update[2] == {
+        1: "Ed25519", 2: 2, 3: object_hash, 4: "withdrawn", 5: "b" * 64
+    }
+    assert bundle.authorization[3] == 2
+    assert bundle.proofs == ()
+
+
 def test_cli_bundle_provider_draft_is_resolvable(tmp_path: Path):
     keypairs = [create_new_key_pair() for _ in range(3)]
     object_hash = "a" * 64

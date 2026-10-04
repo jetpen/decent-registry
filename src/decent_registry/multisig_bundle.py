@@ -5,13 +5,17 @@ from typing import Any, Mapping, Sequence
 
 from decent_registry.encoding import (
     OPERATION_GENESIS,
+    OPERATION_ORDINARY_UPDATE,
     OPERATION_UPGRADE,
     RECORD_KIND_IDENTITY,
     RECORD_KIND_PROVIDER,
     encode_multisignature_signed_update,
     decode_multisignature_signed_update,
 )
-from decent_registry.provider_schema import build_provider_payload_dict
+from decent_registry.provider_schema import (
+    build_provider_payload_dict,
+    build_provider_withdrawal_payload_dict,
+)
 from decent_registry.signed_envelope import (
     decode_multisignature_envelope,
     encode_multisignature_envelope,
@@ -225,6 +229,36 @@ def draft_provider_bundle(
         epoch=epoch,
         predecessor_state_hash=predecessor_state_hash,
         operation=operation,
+    )
+
+
+def draft_provider_withdrawal_bundle(
+    *,
+    object_hash: str,
+    owner_public_key: bytes,
+    seq: int,
+    signer_set: Sequence[Mapping[int, Any]],
+    replacement_object_hash: str | None = None,
+    threshold: int = 2,
+    epoch: int = 1,
+    predecessor_state_hash: bytes = _ZERO_STATE_HASH,
+    alg: str = "Ed25519",
+) -> MultisignatureBundle:
+    """Draft an ordinary threshold-authorized Provider withdrawal."""
+    return draft_bundle(
+        record_kind=RECORD_KIND_PROVIDER,
+        record_fields={1: owner_public_key},
+        payload=build_provider_withdrawal_payload_dict(
+            alg=alg,
+            object_hash=object_hash,
+            replacement_object_hash=replacement_object_hash,
+        ),
+        seq=seq,
+        signer_set=signer_set,
+        threshold=threshold,
+        epoch=epoch,
+        predecessor_state_hash=predecessor_state_hash,
+        operation=OPERATION_ORDINARY_UPDATE,
     )
 
 
