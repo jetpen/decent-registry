@@ -14,6 +14,7 @@ The following behavior is **implemented and code-backed**:
 - threshold finalization, including explicit legacy upgrade;
 - finalized-envelope `put` for both record families;
 - multisignature `get` output with authorization metadata;
+- owner-authorized Provider Record withdrawal as a signed v2 tombstone at the existing Object Hash key, selected-head lookup outcomes, and optional replacement pointers;
 - legacy single-key compatibility before upgrade and rejection of legacy writes after upgrade;
 - signer replacement, ordinary updates, Identity owner-key rotation (operation 5), strict `Seq` ordering, predecessor-state binding, and lookup-key binding.
 - replay of locally retained Identity predecessor history before accepting or resolving operation-5 state; missing or incomplete provenance fails closed.
@@ -119,15 +120,13 @@ payload = {}
 
 The Object Key is `sha256(owner_name_bytes)`. The Owner Public Key remains bound across ordinary updates and is preserved during an explicit upgrade.
 
-Provider Record multisignature updates retain the existing provider payload:
-
 ```text
 record_fields = {
   1: owner_public_key,
 }
 payload = {
   1: alg,
-  2: version,
+  2: 1,
   3: object_hash,
   4: provider_url,
   5: endpoints,
@@ -135,6 +134,46 @@ payload = {
 ```
 
 The Object Hash is the provider DHT lookup key and is also signed inside the payload. Endpoints are canonicalized into sorted order by the provider schema before signing.
+
+#### Provider withdrawal and v2 tombstone
+
+A Provider withdrawal is an ordinary update transition whose signed payload has
+this v2 shape at the existing Object Hash key:
+
+```text
+payload = {
+  1: alg,
+  2: 2,
+  3: object_hash,
+  4: "withdrawn",
+  5: replacement_object_hash,  # optional
+}
+```
+
+The tombstone has no URL or endpoints. Legacy records use their bound Owner
+Public Key; multisignature records require the current threshold and exact
+predecessor state hash. A higher-Seq active v1 state can reactivate the key.
+Replacement Object Hashes are validated for format and self-reference only;
+the Registry does not require the target to exist or share its owner.
+
+Draft a multisignature withdrawal with
+`decent-registry bundle draft provider --withdrawal`, the existing active
+Signer Set, a higher Seq, and the exact predecessor state hash. Then use the
+regular sign/merge/finalize steps. Submit the finalized envelope through
+`decent-registry withdraw provider --finalized-envelope <path>`. Legacy mode
+uses `withdraw provider --owner-privkey <path> --seq <higher>`. The Registry
+fails closed unless it can establish a valid active predecessor; a repeated
+withdrawal is a typed failure. A higher-Seq active v1 publication can reactivate
+that key, and then a later withdrawal is allowed.
+
+When a tombstone is observed and validated, `get provider` returns
+`status: "withdrawn"`, `object_key`, `seq`, optional
+`replacement_object_key`, and multisignature authorization metadata where
+applicable. Missing records remain missing, not withdrawn. Withdrawal does not
+delete the external Storage Object or erase history, replicas, caches, or
+copies already obtained. It does not promise immediate/global propagation or
+cross-node compare-and-swap. Pre-MVP migration and mixed-version deployment are
+not guaranteed.
 
 ## 3. State transitions
 

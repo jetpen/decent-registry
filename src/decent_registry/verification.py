@@ -17,7 +17,12 @@ from decent_registry.encoding import (
     decode_canonical_signed_update,
     decode_multisignature_signed_update,
 )
-from decent_registry.provider_schema import decode_provider_payload_dict
+from decent_registry.exceptions import ProviderAlreadyWithdrawn
+from decent_registry.provider_schema import (
+    ProviderPayloadV1,
+    ProviderWithdrawnPayloadV2,
+    decode_provider_payload_dict,
+)
 from decent_registry.signed_envelope import (
     MultisignatureEnvelope,
     decode_multisignature_envelope,
@@ -537,6 +542,16 @@ def _validate_common_transition(
         raise ValueError("seq must be strictly increasing")
     if authorization[7] != current_state.state_hash:
         raise ValueError("predecessor state mismatch")
+    if current_state.record_kind == RECORD_KIND_PROVIDER:
+        current_update = decode_multisignature_signed_update(
+            current_state.signed_update_bytes
+        )
+        current_payload = decode_provider_payload_dict(current_update[2])
+        candidate_payload = decode_provider_payload_dict(parsed[4])
+        if isinstance(current_payload, ProviderWithdrawnPayloadV2) and isinstance(
+            candidate_payload, ProviderWithdrawnPayloadV2
+        ):
+            raise ProviderAlreadyWithdrawn("Provider Record is already withdrawn")
 
 
 def validate_multisignature_genesis(
@@ -593,6 +608,7 @@ def validate_multisignature_envelope(
     }:
         raise ValueError("complete predecessor history is required for Identity state")
 
+
     if operation == OPERATION_UPGRADE:
         if authorization[4] != 1:
             raise ValueError("upgrade epoch must be 1")
@@ -641,6 +657,21 @@ def validate_multisignature_ordinary_update(
         parsed=parsed,
         current_state=current_state,
     )
+    if current_state.record_kind == RECORD_KIND_PROVIDER:
+        current_update = decode_multisignature_signed_update(
+            current_state.signed_update_bytes
+        )
+        candidate_payload = decode_provider_payload_dict(parsed[4])
+        current_payload = decode_provider_payload_dict(current_update[2])
+        if isinstance(current_payload, ProviderWithdrawnPayloadV2):
+            raise ProviderAlreadyWithdrawn("Provider Record is already withdrawn")
+        if isinstance(candidate_payload, ProviderWithdrawnPayloadV2):
+            _validate_threshold_proofs(
+                signed_update_bytes=parsed[0],
+                envelope=parsed[1],
+                signer_set=current_state.signer_set,
+                threshold=current_state.threshold,
+            )
     if authorization[4] != current_state.epoch:
         raise ValueError("epoch does not match current state")
     if authorization[5] != current_state.threshold:

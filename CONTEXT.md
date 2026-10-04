@@ -13,7 +13,7 @@ _Avoid_: Envelope, signed value
 **Identity Record**: A record type where `record_fields` bind an owner name to an Ed25519 public key. The DHT record key is derived from the owner name bytes.
 _Avoid_: User record, identity claim
 
-**Provider Record**: A record type where the SignedUpdate binds an `object_hash` to a provider URL and a sorted list of multiaddr endpoints.
+**Provider Record**: A record type where a SignedUpdate binds an Object Hash to an active provider URL and sorted multiaddr endpoints, or binds an explicit signed v2 withdrawal state for that Object Hash.
 _Avoid_: Object record, provider claim
 
 **Owner Name**: The byte-string identity input that defines an Identity Record’s derived DHT record key.

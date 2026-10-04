@@ -63,7 +63,14 @@ Private keys must never be displayed, logged, transmitted as Registry content, c
 
 ## 5. CLI integration with put/get examples
 
-The implemented CLI surface is `keygen`, `node`, `bundle draft`, `bundle sign`, `bundle merge`, `bundle finalize`, `put identity`, `put provider`, `get identity`, and `get provider`. The full, tested legacy workflows are in [Provider Record put/get examples](provider-put-get-examples.md) and [Identity Record put/get examples](identity-put-get-examples.md). The implemented multisignature workflow is in [Multisignature Records and Migration](multisignature-records.md). The following commands show the interface shape without inventing deployment values.
+The implemented CLI surface is `keygen`, `node`, `bundle draft`, `bundle sign`, `bundle merge`, `bundle finalize`, `put identity`, `put provider`, `get identity`, `get provider`, and `withdraw provider`. The full workflows are in [Provider Record put/get examples](provider-put-get-examples.md) and [Identity Record put/get examples](identity-put-get-examples.md). The implemented multisignature workflow is in [Multisignature Records and Migration](multisignature-records.md). The following commands show the interface shape without inventing deployment values.
+
+`withdraw provider` accepts either the legacy bound Owner Public Key and a higher
+`Seq`, or a finalized threshold-authorized withdrawal SignedEnvelope. It fails
+closed without a valid active predecessor. The typed `get provider` result
+reports an observed tombstone without treating missing as withdrawn. Withdrawal
+does not delete the external object or previously obtained copies, erase Registry
+history, or guarantee immediate/global propagation or cross-node compare-and-swap.
 
 Start a node and copy its emitted bootstrap address:
 

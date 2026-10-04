@@ -189,6 +189,35 @@ For a fixed provider DHT key (= `object_hash`):
 - An overwrite is rejected if the signer’s `owner_public_key` changes ("owner collision").
 - Canonical CBOR + signature validity are required.
 
+## Withdraw a Provider Record
+
+`withdraw provider` publishes a signed v2 tombstone at the same Object Hash
+key. Legacy mode requires the bound Owner Public Key's key and a Seq greater
+than the active record; `--replacement-object-hash` is optional. The command
+fails closed if it cannot read and validate an active predecessor. Finalized
+mode accepts a threshold-authorized tombstone envelope produced by
+`bundle draft provider --withdrawal` followed by the regular bundle
+sign/merge/finalize workflow.
+
+```bash
+decent-registry withdraw provider \
+  --host 127.0.0.1 --port <CLIENT_PORT> \
+  --bootstrap <SEED_LISTEN_MULTIADDR>/p2p/<SEED_PEER_ID> \
+  --object-hash <OBJECT_HASH_64_HEX> \
+  --owner-privkey ~/.decent/owner_privkey.pem \
+  --seq <GREATER_THAN_ACTIVE_SEQ> \
+  --replacement-object-hash <OPTIONAL_DIFFERENT_OBJECT_HASH>
+```
+
+On an observed, valid tombstone, `get provider` exits successfully with JSON
+containing `status: "withdrawn"`, `object_key`, and `seq`, plus
+`replacement_object_key` when present and authorization metadata for
+multisignature withdrawals. An already-withdrawn record is a typed failure,
+not success. Withdrawal does not delete the external object, Registry history,
+or previously obtained copies, and does not promise immediate/global
+propagation or network-wide compare-and-swap. Pre-MVP migration and
+mixed-version deployments are not guaranteed.
+
 ---
 
 ## Runnable end-to-end example (single copy/paste)
