@@ -134,7 +134,7 @@ async def main() -> None:
             # PUT into Network2 overlay.
             await node2b_service.put_provider(
                 object_hash=obj_hash,
-                provider_url=provider_url,
+                provider_urls=[provider_url],
                 owner_privkey_pem_path=owner_privkey_pem_path,
                 seq=2,
                 endpoints=endpoints_sorted,

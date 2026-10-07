@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives.serialization import (
 
 from decent_registry.dht.libp2p_dht import Libp2pKadDHT
 from decent_registry.registry_service import RegistryService
+from decent_registry.record_validator import ProviderWithdrawnResult
 
 
 def free_port() -> int:
@@ -63,14 +64,16 @@ async def poll_get_until(
     object_hash: str,
     poll_interval_s: float,
     max_wait_s: float,
-):
+) -> tuple[bool, float | None, list[str] | None, list[str] | None]:
     deadline = trio.current_time() + max_wait_s
     first_found_after = None
     while trio.current_time() <= deadline:
         res = await service.get_provider(object_hash=object_hash)
         if res is not None:
             first_found_after = max(0.0, trio.current_time() - (deadline - max_wait_s))
-            return True, first_found_after, res.provider_url, res.endpoints
+            if not isinstance(res, ProviderWithdrawnResult):
+                return True, first_found_after, res.provider_urls, res.endpoints
+            return True, first_found_after, None, None
         await trio.sleep(poll_interval_s)
     return False, None, None, None
 
@@ -83,7 +86,7 @@ async def run_scenario(
     owner_privkey_pem_path: str,
     endpoints_sorted: list[str],
     obj_hash_put: str,
-    provider_url_put: str,
+    provider_urls_put: list[str],
     node1b_service: RegistryService,
     node2b_service: RegistryService,
     bootstrap_to: list[str],
@@ -106,7 +109,7 @@ async def run_scenario(
     t0 = trio.current_time()
     await RegistryService(dht=client_dht).put_provider(
         object_hash=obj_hash_put,
-        provider_url=provider_url_put,
+        provider_urls=provider_urls_put,
         owner_privkey_pem_path=owner_privkey_pem_path,
         seq=1 if obj_hash_put.startswith('a') else 2,
         endpoints=endpoints_sorted,
@@ -160,8 +163,8 @@ async def main():
         obj_hash_a = "a" * 64
         obj_hash_b = "b" * 64
 
-        provider_url_a = "https://example.com/provider/a"
-        provider_url_b = "https://example.com/provider/b"
+        provider_urls_a = ["https://example.com/provider/a", "ipfs://example/a"]
+        provider_urls_b = ["https://example.com/provider/b", "ipfs://example/b"]
 
         async with (
             Libp2pKadDHT(listen=listen_tcp(seed1_port)) as seed1a,
@@ -188,7 +191,7 @@ async def main():
                     owner_privkey_pem_path=owner_privkey_pem_path,
                     endpoints_sorted=endpoints_sorted,
                     obj_hash_put=obj_hash_a,
-                    provider_url_put=provider_url_a,
+                    provider_urls_put=provider_urls_a,
                     node1b_service=node1b_service,
                     node2b_service=node2b_service,
                     bootstrap_to=["seed1"],
@@ -205,7 +208,7 @@ async def main():
                     owner_privkey_pem_path=owner_privkey_pem_path,
                     endpoints_sorted=endpoints_sorted,
                     obj_hash_put=obj_hash_b,
-                    provider_url_put=provider_url_b,
+                    provider_urls_put=provider_urls_b,
                     node1b_service=node1b_service,
                     node2b_service=node2b_service,
                     bootstrap_to=["seed1", "seed2"],
