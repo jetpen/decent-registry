@@ -8,6 +8,7 @@ from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption,
 
 from decent_registry.dht.libp2p_dht import Libp2pKadDHT
 from decent_registry.registry_service import RegistryService
+from decent_registry.record_validator import ProviderWithdrawnResult
 
 
 def free_port() -> int:
@@ -48,7 +49,9 @@ async def get_with_retries(service: RegistryService, *, object_hash: str, tries:
     for _ in range(tries):
         res = await service.get_provider(object_hash=object_hash)
         if res is not None:
-            return True, res.provider_url, res.endpoints
+            if isinstance(res, ProviderWithdrawnResult):
+                return True, None, None
+            return True, res.provider_urls, res.endpoints
         await trio.sleep(sleep_s)
     return False, None, None
 
@@ -98,7 +101,7 @@ async def main():
 
                 await service_bridge.put_provider(
                     object_hash=obj_hash1,
-                    provider_url=provider_url1,
+                    provider_urls=[provider_url1],
                     owner_privkey_pem_path=owner_privkey_path,
                     seq=1,
                     endpoints=endpoints_sorted,
@@ -124,7 +127,7 @@ async def main():
             await trio.sleep(0.9)
             await service1b.put_provider(
                 object_hash=obj_hash2,
-                provider_url=provider_url2,
+                provider_urls=[provider_url2],
                 owner_privkey_pem_path=owner_privkey_path,
                 seq=2,
                 endpoints=endpoints_sorted,

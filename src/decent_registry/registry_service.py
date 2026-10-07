@@ -16,7 +16,7 @@ from decent_registry.exceptions import (
     ProviderStateInvalid,
     ProviderStateUnavailable,
 )
-from decent_registry.provider_schema import ProviderPayloadV1
+from decent_registry.provider_schema import ProviderPayloadV3
 from decent_registry.record_validator import (
     IdentityRecordResult,
     ProviderRecordResult,
@@ -36,7 +36,7 @@ class RegistryDHT(Protocol):
 
     async def get_signed_provider_record(
         self, object_hash: str, quorum: int = 0
-    ) -> ProviderPayloadV1 | ProviderWithdrawnResult | ProviderRecordResult | None: ...
+    ) -> ProviderPayloadV3 | ProviderWithdrawnResult | ProviderRecordResult | None: ...
 
     async def put_signed_identity_record(
         self, object_key_hex: str, envelope_cbor: bytes
@@ -89,18 +89,17 @@ class RegistryService:
         self,
         *,
         object_hash: str,
-        provider_url: str | None = None,
+        provider_urls: list[str] | None = None,
         owner_privkey_pem_path: str | None = None,
         seq: int | None = None,
         endpoints: list[str] | None = None,
         alg: str = "Ed25519",
-        version: int = 1,
         envelope_cbor: bytes | None = None,
     ) -> None:
         """Publish either a legacy single-key record or a finalized envelope."""
         if envelope_cbor is not None:
             if (
-                provider_url is not None
+                provider_urls is not None
                 or owner_privkey_pem_path is not None
                 or seq is not None
                 or endpoints is not None
@@ -115,22 +114,21 @@ class RegistryService:
             return
 
         if (
-            provider_url is None
+            provider_urls is None
             or owner_privkey_pem_path is None
             or seq is None
             or endpoints is None
         ):
             raise TypeError(
-                "legacy provider put requires provider_url, owner_privkey_pem_path, seq, and endpoints"
+                "legacy provider put requires provider_urls, owner_privkey_pem_path, seq, and endpoints"
             )
         envelope_cbor = build_provider_envelope(
             object_hash=object_hash,
-            provider_url=provider_url,
+            provider_urls=provider_urls,
             owner_privkey_pem_path=owner_privkey_pem_path,
             seq=seq,
             endpoints=endpoints,
             alg=alg,
-            version=version,
         )
         await self.dht.put_signed_provider_record(object_hash, envelope_cbor)
 
@@ -222,7 +220,7 @@ class RegistryService:
         *,
         object_hash: str,
         quorum: int = 0,
-    ) -> ProviderPayloadV1 | ProviderWithdrawnResult | ProviderRecordResult | None:
+    ) -> ProviderPayloadV3 | ProviderWithdrawnResult | ProviderRecordResult | None:
         return await self.dht.get_signed_provider_record(object_hash, quorum=quorum)
 
     async def put_identity(

@@ -157,7 +157,7 @@ async def test_dht_put_get_uses_durable_accepted_state_over_stale_dht(tmp_path):
 
     genesis_bundle = draft_provider_bundle(
         object_hash=OBJECT_HASH,
-        provider_url="https://example.com/one.bin",
+        provider_urls=["https://example.com/one.bin"],
         endpoints=["/ip4/127.0.0.1/tcp/9000"],
         owner_public_key=keypairs[0].public_key.to_bytes(),
         seq=1,
@@ -174,7 +174,7 @@ async def test_dht_put_get_uses_durable_accepted_state_over_stale_dht(tmp_path):
 
     ordinary_bundle = draft_provider_bundle(
         object_hash=OBJECT_HASH,
-        provider_url="https://example.com/two.bin",
+        provider_urls=["https://example.com/two.bin"],
         endpoints=["/ip4/127.0.0.1/tcp/9001"],
         owner_public_key=keypairs[0].public_key.to_bytes(),
         seq=2,
@@ -192,7 +192,7 @@ async def test_dht_put_get_uses_durable_accepted_state_over_stale_dht(tmp_path):
 
     stale_conflict_bundle = draft_provider_bundle(
         object_hash=OBJECT_HASH,
-        provider_url="https://example.com/conflict.bin",
+        provider_urls=["https://example.com/conflict.bin"],
         endpoints=["/ip4/127.0.0.1/tcp/9002"],
         owner_public_key=keypairs[0].public_key.to_bytes(),
         seq=2,
@@ -211,7 +211,7 @@ async def test_dht_put_get_uses_durable_accepted_state_over_stale_dht(tmp_path):
     fake.values[adapter._kad_key(OBJECT_HASH)] = genesis
     next_bundle = draft_provider_bundle(
         object_hash=OBJECT_HASH,
-        provider_url="https://example.com/three.bin",
+        provider_urls=["https://example.com/three.bin"],
         endpoints=["/ip4/127.0.0.1/tcp/9003"],
         owner_public_key=keypairs[0].public_key.to_bytes(),
         seq=3,
@@ -227,7 +227,7 @@ async def test_dht_put_get_uses_durable_accepted_state_over_stale_dht(tmp_path):
     resolved = await adapter.get_signed_provider_record(OBJECT_HASH)
     assert resolved is not None
     assert resolved.seq == 3
-    assert resolved.provider_url.endswith("three.bin")
+    assert resolved.provider_urls[0].endswith("three.bin")
 
     fake.fail_reads = True
     fallback = await adapter.get_signed_provider_record(OBJECT_HASH)
@@ -1146,12 +1146,12 @@ async def test_dht_preserves_legacy_put_behavior_with_legacy_durable_cache(tmp_p
     fake = adapter.dht
     owner_public_key = keypairs[0].public_key.to_bytes()
 
-    def legacy_envelope(*, seq: int, provider_url: str) -> bytes:
+    def active_envelope(*, seq: int, provider_url: str) -> bytes:
         payload = build_provider_payload_dict(
             alg="Ed25519",
-            version=1,
+            version=3,
             object_hash=OBJECT_HASH,
-            provider_url=provider_url,
+            provider_urls=[provider_url],
             endpoints=["/ip4/127.0.0.1/tcp/9000"],
         )
         signed_update = encode_signed_update(
@@ -1171,9 +1171,9 @@ async def test_dht_preserves_legacy_put_behavior_with_legacy_durable_cache(tmp_p
     adapter._durable_store.put(
         kind="provider",
         key=record_key,
-        value=legacy_envelope(seq=9, provider_url="https://example.com/old.bin"),
+        value=active_envelope(seq=9, provider_url="https://example.com/old.bin"),
     )
-    current = legacy_envelope(
+    current = active_envelope(
         seq=1, provider_url="https://example.com/current.bin"
     )
 
@@ -1181,7 +1181,7 @@ async def test_dht_preserves_legacy_put_behavior_with_legacy_durable_cache(tmp_p
     assert fake.values[adapter._kad_key(OBJECT_HASH)] == current
     resolved = await adapter.get_signed_provider_record(OBJECT_HASH)
     assert resolved is not None
-    assert resolved.provider_url.endswith("current.bin")
+    assert resolved.provider_urls[0].endswith("current.bin")
 
 
 def _legacy_rotation_envelope(keypairs: list[Any], *, seq: int = 2) -> bytes:

@@ -265,9 +265,9 @@ def test_valid_provider_overwrite():
     endpoints = ["/ip4/2/tcp/1", "/ip4/1/tcp/9", "/ip4/1/tcp/1"]
     payload_dict = build_provider_payload_dict(
         alg="Ed25519",
-        version=1,
+        version=3,
         object_hash=object_hash_hex,
-        provider_url=PROVIDER_URL,
+        provider_urls=[PROVIDER_URL],
         endpoints=endpoints,
     )
 
@@ -318,9 +318,9 @@ def test_validate_signed_update_overwrite_delegates(kind: str):
         endpoints = ["/ip4/2/tcp/1", "/ip4/1/tcp/9", "/ip4/1/tcp/1"]
         payload_dict = build_provider_payload_dict(
             alg="Ed25519",
-            version=1,
+            version=3,
             object_hash=object_hash_hex,
-            provider_url=PROVIDER_URL,
+            provider_urls=[PROVIDER_URL],
             endpoints=endpoints,
         )
         signed_update_bytes = _provider_update(

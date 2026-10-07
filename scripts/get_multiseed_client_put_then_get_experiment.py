@@ -135,7 +135,7 @@ async def main() -> None:
                 # PUT the record while connected to both seeds.
                 await client_service.put_provider(
                     object_hash=obj_hash_put,
-                    provider_url=provider_url_put,
+                    provider_urls=[provider_url_put],
                     owner_privkey_pem_path=owner_privkey_pem_path,
                     seq=2,
                     endpoints=endpoints_sorted,

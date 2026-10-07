@@ -106,7 +106,7 @@ def test_registry_service_submits_finalized_multisig_envelopes_without_private_k
     )
     provider_bundle = draft_provider_bundle(
         object_hash=OBJECT_HASH,
-        provider_url="https://example.com/service.bin",
+        provider_urls=["https://example.com/service.bin"],
         endpoints=["/ip4/127.0.0.1/tcp/9000"],
         owner_public_key=keypairs[0].public_key.to_bytes(),
         seq=1,

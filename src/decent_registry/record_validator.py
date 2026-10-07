@@ -17,7 +17,7 @@ from decent_registry.encoding import (
 from decent_registry.exceptions import ProviderAlreadyWithdrawn
 
 from decent_registry.provider_schema import (
-    ProviderPayloadV1,
+    ProviderPayloadV3,
     ProviderWithdrawnPayloadV2,
     decode_provider_payload_dict,
     is_provider_withdrawn_payload,
@@ -110,7 +110,7 @@ class ProviderWithdrawnResult:
 
 @dataclass(frozen=True, slots=True)
 class ProviderRecordResult:
-    payload: ProviderPayloadV1
+    payload: ProviderPayloadV3
     seq: int
     authorization: AuthorizationMetadata
 
@@ -127,8 +127,8 @@ class ProviderRecordResult:
         return self.payload.object_hash
 
     @property
-    def provider_url(self) -> str:
-        return self.payload.provider_url
+    def provider_urls(self) -> list[str]:
+        return self.payload.provider_urls
 
     @property
     def endpoints(self) -> list[str]:
@@ -140,7 +140,7 @@ class ProviderRecordResult:
             "object_hash": self.object_hash,
             "alg": self.alg,
             "version": self.version,
-            "provider_url": self.provider_url,
+            "provider_urls": self.provider_urls,
             "endpoints": self.endpoints,
             "seq": self.seq,
             "authorization": self.authorization.to_dict(),
@@ -322,7 +322,7 @@ class RecordValidator:
                         raise ProviderAlreadyWithdrawn(
                             "Provider Record is already withdrawn"
                         )
-                    if not isinstance(existing_payload, ProviderPayloadV1):
+                    if not isinstance(existing_payload, ProviderPayloadV3):
                         raise ValueError("active predecessor Provider Record is invalid")
                 legacy_envelope_cbor = existing_envelope_cbor
         state = validate_multisignature_update(
@@ -338,7 +338,7 @@ class RecordValidator:
                 current_state.signed_update_bytes
             )
             current_payload = decode_provider_payload_dict(current_update[2])
-            if not isinstance(current_payload, ProviderPayloadV1):
+            if not isinstance(current_payload, ProviderPayloadV3):
                 raise ProviderAlreadyWithdrawn("Provider Record is already withdrawn")
         return state
 
@@ -425,7 +425,7 @@ class RecordValidator:
                     decode_multisignature_envelope(existing_envelope_cbor).signed_update_bytes
                 )
                 current_payload = decode_provider_payload_dict(current_update[2])
-                if not isinstance(current_payload, ProviderPayloadV1):
+                if not isinstance(current_payload, ProviderPayloadV3):
                     raise ProviderAlreadyWithdrawn("Provider Record is already withdrawn")
                 current_owner = bytes(current_update[1][1])
                 proposed_owner = bytes(signed_update[1][1])
@@ -496,7 +496,7 @@ class RecordValidator:
                     existing_state.signed_update_bytes
                 )
                 existing_payload = decode_provider_payload_dict(existing_update[2])
-                if not isinstance(existing_payload, ProviderPayloadV1):
+                if not isinstance(existing_payload, ProviderPayloadV3):
                     raise ProviderAlreadyWithdrawn("Provider Record is already withdrawn")
                 if seq <= existing_state.seq:
                     raise ValueError("seq must be strictly increasing")
@@ -510,7 +510,7 @@ class RecordValidator:
                 ) or bytes(existing_update[1][1]) != bytes(owner_public_key):
                     raise ValueError("invalid or mismatched active predecessor owner")
                 existing_payload = decode_provider_payload_dict(existing_update[2])
-                if not isinstance(existing_payload, ProviderPayloadV1):
+                if not isinstance(existing_payload, ProviderPayloadV3):
                     raise ProviderAlreadyWithdrawn("Provider Record is already withdrawn")
                 if existing_payload.object_hash != provider_payload.object_hash:
                     raise ValueError("active predecessor Object Hash does not match")
@@ -612,7 +612,7 @@ class RecordValidator:
         record_key: bytes,
         envelope_cbor: bytes,
         existing_envelope_cbor: bytes | None = None,
-    ) -> ProviderPayloadV1 | ProviderWithdrawnResult | ProviderRecordResult:
+    ) -> ProviderPayloadV3 | ProviderWithdrawnResult | ProviderRecordResult:
         if _is_multisignature_envelope(envelope_cbor):
             signed_update_bytes = decode_multisignature_envelope(
                 envelope_cbor
@@ -639,7 +639,7 @@ class RecordValidator:
                 envelope_cbor=envelope_cbor,
             )
             decoded_payload = decode_provider_payload_dict(signed_update[2])
-            if not isinstance(decoded_payload, ProviderPayloadV1):
+            if not isinstance(decoded_payload, ProviderPayloadV3):
                 raise ValueError("invalid Provider Record payload state")
             return ProviderRecordResult(
                 payload=decoded_payload,
@@ -701,7 +701,7 @@ class RecordValidator:
             signature=existing_signature,
         ):
             raise ValueError("invalid active predecessor signature")
-        if not isinstance(existing_payload, ProviderPayloadV1):
+        if not isinstance(existing_payload, ProviderPayloadV3):
             raise ValueError("withdrawal predecessor is not active")
         if existing_payload.object_hash != decoded_payload.object_hash:
             raise ValueError("active predecessor Object Hash does not match")

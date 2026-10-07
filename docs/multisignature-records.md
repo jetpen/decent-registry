@@ -124,16 +124,18 @@ The Object Key is `sha256(owner_name_bytes)`. The Owner Public Key remains bound
 record_fields = {
   1: owner_public_key,
 }
-payload = {
-  1: alg,
-  2: 1,
-  3: object_hash,
-  4: provider_url,
-  5: endpoints,
-}
 ```
 
-The Object Hash is the provider DHT lookup key and is also signed inside the payload. Endpoints are canonicalized into sorted order by the provider schema before signing.
+### Provider Record (active v3)
+
+The Object Key is the Object Hash. Active payload fields are `1: alg`, `2: 3`,
+`3: object_hash`, `4: provider_urls` (1–32 unique, sorted absolute URIs, each
+at most 2048 UTF-8 bytes), and `5: endpoints` (the unchanged sorted multiaddr
+list). Provider locators accept protocol-agnostic URI schemes; the Registry
+does not fetch them or implement scheme handlers. Consumers select supported
+schemes and verify retrieved bytes against `object_hash`. Active v1 payloads
+are unsupported and must be republished as v3. The v2 withdrawal tombstone
+below is unchanged.
 
 #### Provider withdrawal and v2 tombstone
 
@@ -152,7 +154,7 @@ payload = {
 
 The tombstone has no URL or endpoints. Legacy records use their bound Owner
 Public Key; multisignature records require the current threshold and exact
-predecessor state hash. A higher-Seq active v1 state can reactivate the key.
+predecessor state hash. A higher-Seq active v3 state can reactivate the key.
 Replacement Object Hashes are validated for format and self-reference only;
 the Registry does not require the target to exist or share its owner.
 
@@ -163,7 +165,7 @@ regular sign/merge/finalize steps. Submit the finalized envelope through
 `decent-registry withdraw provider --finalized-envelope <path>`. Legacy mode
 uses `withdraw provider --owner-privkey <path> --seq <higher>`. The Registry
 fails closed unless it can establish a valid active predecessor; a repeated
-withdrawal is a typed failure. A higher-Seq active v1 publication can reactivate
+withdrawal is a typed failure. A higher-Seq active v3 publication can reactivate
 that key, and then a later withdrawal is allowed.
 
 When a tombstone is observed and validated, `get provider` returns
@@ -268,7 +270,7 @@ PY
 }
 ```
 
-The `example.com` Provider URL is only used to construct and sign a Provider Record; replace it with the actual object URL before publication. The draft, sign, merge, finalize, incomplete-bundle, and replacement commands below are runnable after this setup. Network `put`/`get` commands additionally require a running Registry node and the `SEED_BOOTSTRAP` and `CLIENT_PORT` variables described in section 5.
+The example uses a single provider URI locator to construct and sign the v3 Provider Record; replace it with the actual object location before publication. The draft, sign, merge, finalize, incomplete-bundle, and replacement commands below are runnable after this setup. Network `put`/`get` commands additionally require a running Registry node and the `SEED_BOOTSTRAP` and `CLIENT_PORT` variables described in section 5.
 
 ### 4.1 Identity Record: genesis
 
@@ -436,7 +438,7 @@ output, object_hash, provider_url, private_key_path = sys.argv[1:]
 Path(output).write_bytes(
     build_provider_envelope(
         object_hash=object_hash,
-        provider_url=provider_url,
+        provider_urls=[provider_url],
         owner_privkey_pem_path=private_key_path,
         seq=1,
         endpoints=['/ip4/127.0.0.1/tcp/10001'],
@@ -693,7 +695,7 @@ decent-registry get provider \
   --object-hash "$OBJECT_HASH"
 ```
 
-A multisignature Provider Record includes `object_key`, `object_hash`, `alg`, payload `version`, `provider_url`, sorted `endpoints`, `seq`, and the same `authorization` object.
+A multisignature Provider Record includes `object_key`, `object_hash`, `alg`, active payload `version` (`3`), `provider_urls`, sorted `endpoints`, `seq`, and the same `authorization` object.
 
 The existing network setup and endpoint rules are documented in [protocol concepts](protocol-concepts.md), [Identity Record put/get examples](identity-put-get-examples.md), and [Provider Record put/get examples](provider-put-get-examples.md).
 

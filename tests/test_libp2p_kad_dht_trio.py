@@ -27,9 +27,9 @@ async def test_kad_dht_put_get_two_nodes():
 
     payload_dict = build_provider_payload_dict(
         alg="Ed25519",
-        version=1,
+        version=3,
         object_hash=obj_hash,
-        provider_url=provider_url,
+        provider_urls=[provider_url],
         endpoints=endpoints_unsorted,
     )
     signed_update_bytes = encode_signed_update(
@@ -65,5 +65,5 @@ async def test_kad_dht_put_get_two_nodes():
         got = await dht2.get_signed_provider_record(obj_hash)
         assert got is not None
         assert got.object_hash == obj_hash
-        assert got.provider_url == provider_url
+        assert got.provider_urls == [provider_url]
         assert got.endpoints == endpoints_sorted

@@ -33,7 +33,7 @@ Current implementation details are linked to the canonical protocol, setup, conf
 
 **Sovereignty and privacy properties:** The record is cryptographically verifiable and the signing key remains under the provider’s control. A public Provider Record is not private by default.
 
-**Current-versus-future status:** Implemented through the CLI, Python service, provider schema, Canonical CBOR, and DHT surfaces. See [Provider Record put/get examples](provider-put-get-examples.md) and [protocol concepts](protocol-concepts.md).
+**Current-versus-future status:** Implemented through the CLI, Python service, provider schema, Canonical CBOR, and DHT surfaces. The Provider Record stores one or more validated `provider_urls` plus a separate list of multiaddr `endpoints`; neither field promises reachability. See [Provider Record put/get examples](provider-put-get-examples.md) and [protocol concepts](protocol-concepts.md).
 
 **Limitations:** A valid record does not guarantee provider availability, endpoint reachability, privacy, global replication, or resistance to every attack.
 
@@ -191,27 +191,27 @@ Current implementation details are linked to the canonical protocol, setup, conf
 
 **Actors:** A content owner, a public cloud hosting provider, a hostile actor such as a state authority pressuring the host, and end-user clients.
 
-**Motivation:** Demonstrate censorship resistance through content addressing. A document’s identity is its Object Hash, independent of its hosting location. If a host is pressured to remove the file, the owner can re-host the identical bytes elsewhere and repoint the registry record; the public finds the document again under the same lookup key and verifies that the bytes are unchanged.
+**Motivation:** Demonstrate censorship resistance through content addressing. A document’s identity is its Object Hash, independent of hosting location. If a host is pressured to remove the file, the owner can re-host the identical bytes elsewhere and advertise another locator; clients can discover the new source under the same lookup key and verify the bytes are unchanged.
 
 **User flow:**
 
 1. The owner computes the Object Hash `H` of a document. `H` identifies the content regardless of hosting location.
 2. The owner uploads the document to public cloud infrastructure and obtains `URL_A`.
-3. The owner publishes a signed Provider Record for Object Hash `H` with `provider_url = URL_A`, endpoint information, and an Ed25519 signature at `seq = 1`, following [Publish and resolve a signed Provider Record](#1-publish-and-resolve-a-signed-provider-record), the [Provider Record examples](provider-put-get-examples.md) flow, and the [Client key configuration](client-keygen-cli-config.md) guidance.
-4. A client resolves the record with `get provider --object-hash H`, verifies the signature, downloads from `URL_A`, and confirms that the downloaded bytes match `H`.
+3. The owner publishes a signed Provider Record for Object Hash `H` advertising `URL_A` plus any other available provider URI locators, along with provider `endpoints` and an Ed25519 signature at `seq = 1`, following [Publish and resolve a signed Provider Record](#1-publish-and-resolve-a-signed-provider-record), the [Provider Record examples](provider-put-get-examples.md) flow, and the [Client key configuration](client-keygen-cli-config.md) guidance.
+4. A client resolves the record with `get provider --object-hash H`, verifies the signature, selects a supported locator such as `URL_A`, and confirms downloaded bytes match `H`.
 5. A hostile actor pressures the cloud provider, and `URL_A` stops serving the file.
-6. The registry entry is unaffected: the DHT stores the signed pointer, not the file content. Censoring the hosting does not remove the registry record.
-7. The owner uses a backup to re-host the identical bytes on different infrastructure at `URL_B`. The Object Hash remains `H`.
-8. The owner publishes an updated Provider Record for the same Object Hash, using the same owner key and a strictly increasing `seq = 2` with `provider_url = URL_B`. The registry accepts the update through the sequence-monotonic overwrite path because the owner key is unchanged.
-9. A client resolves the same key again and receives `URL_B`. The public downloads the file at its new location and recomputes the Object Hash to confirm it is the same document.
+6. The Registry entry is unaffected: the DHT stores signed locators, not the file content. Censoring one hosting provider does not remove the Provider Record or its other locators.
+7. The owner may re-host the identical bytes at `URL_B` and publish a higher-Seq Provider Record with `URL_B` in its `provider_urls` list, optionally retaining other valid locators. The Object Hash remains `H`.
+8. A client resolves the same key, selects an available supported locator from the updated `provider_urls`, and verifies downloaded bytes against `H`.
+
 
 **Services involved:** The implemented Registry (`put provider`/`get provider`, canonical CBOR signed envelopes, and local Ed25519 signing) plus ordinary public web hosting external to the Registry.
 
-**Sovereignty and privacy properties:** Content addressing decouples a document’s identity from any single host, so availability is not tied to one provider’s willingness to serve. Under the owner-collision rule, only the owner’s key can repoint the record. Clients can verify that downloaded bytes match the Object Hash. The Registry stores signed pointers rather than file content, limiting its own censorship surface. A public record is not private by default.
+**Sovereignty and privacy properties:** Content addressing decouples a document’s identity from a single host. Multiple URI locators can aid discovery, but do not guarantee availability, independence, or censorship resistance; owners control updates with their signing key and clients verify bytes against the Object Hash. The Registry stores signed pointers rather than file content. A public record is not private by default.
 
 **Current-versus-future status:** Implemented and code-backed for signed Provider Records, `put provider`/`get provider`, sequence monotonicity, and owner-collision rejection — see [Protocol concepts](protocol-concepts.md) and [Provider Record examples](provider-put-get-examples.md). See the [single-node setup](single-node-server-setup.md) and [multi-node setup](multi-node-cluster-setup.md) guides for running the Registry backbone. The provider put/get path is also exercised end to end by the gated acceptance test `tests/test_acceptance_object_url.py`, run with `DECENT_REGISTRY_RUN_ACCEPTANCE=1`. The hosting, takedown, and re-hosting steps are illustrative narratives over these existing interfaces.
 
-**Limitations:** The Registry cannot force a host to retain content or restore a removed URL. Clients must compute the Object Hash of downloaded bytes and compare it with the Object Hash in the record to detect a mismatched or forged copy. The owner must retain the signing key to repoint the record; key recovery is separate research. The record is a live pointer, so the old URL is overwritten rather than retained as guaranteed history. Stale pointers may persist in intermediate caches until the new record propagates.
+**Limitations:** The Registry cannot force a host to retain content or restore a removed locator. Clients must compute the Object Hash of downloaded bytes and compare it with the record to detect mismatches. The owner must retain the signing key to publish updated provider URIs. The record is a live locator list, not guaranteed history; stale pointers may persist during propagation. Multiple advertised locators do not themselves prove availability or independence—clients should choose an available supported source and verify its content.
 
 ## 9. Publish and resolve a web-page `kad:` link through a Chromium extension
 
@@ -219,7 +219,7 @@ Current implementation details are linked to the canonical protocol, setup, conf
 
 **Actors:** A content publisher embedding a link in a web page, an end user, a Chromium browser with the proposed extension installed, Registry nodes, and a host provider serving the target object.
 
-**Motivation:** Let a web page publish a stable content-addressed link whose target can be found even when its host provider changes. The Registry supplies indirection between the Object Hash and the current provider URL, allowing content to move elsewhere without changing the discovery reference.
+**Motivation:** Let a web page publish a stable content-addressed link whose target can be discovered even when its host changes. The Registry publishes provider URI locators under an Object Hash; the proposed browser client chooses an HTTP(S) locator it can open.
 
 **User flow:**
 
@@ -227,18 +227,20 @@ Current implementation details are linked to the canonical protocol, setup, conf
 2. An end user browses that page in Chromium with the proposed extension installed and activates the `kad:` link.
 3. The extension intercepts the link activation and parses the custom URL using the grammar in [Registry service URL format](research/registry-url-format.md). The multiaddr is a bootstrap multiaddr containing `/p2p/<peerid>`; it is not an HTTP authority component.
 4. Through the proposed local HTTP gateway or native-messaging bridge, the extension connects to the Registry using the bootstrap multiaddr and requests the Provider Record for the Object Hash. The browser-extension architecture and its limitations are described in [Chromium extension DHT URL resolution research](research/browser-extension-dht-url-rendering.md).
-5. The Registry returns the signed Provider Record, which includes the validated `provider_url` of the target object and provider endpoint information, following [Publish and resolve a signed Provider Record](#1-publish-and-resolve-a-signed-provider-record). The extension or bridge verifies the `SignedEnvelope` and Provider Record before using the URL. The terminology and implementation boundaries follow [`CONTEXT.md`](../CONTEXT.md).
-6. The extension opens or navigates a browser tab to the returned HTTP(S) `provider_url`, causing Chromium to perform the ordinary GET and render the target object.
+5. The Registry returns the signed Provider Record, including its validated `provider_urls` and separate multiaddr `endpoints`. The extension or bridge verifies the `SignedEnvelope` and Provider Record. For browser navigation, the client selects a supported HTTP(S) locator; non-HTTP schemes require a suitable external handler and are not opened by the extension.
+6. The extension selects a supported HTTP(S) URI from `provider_urls` and navigates to it, causing Chromium to perform the ordinary GET and render the target object.
 7. The client may recompute the SHA-256 digest of downloaded bytes and compare it with the Object Hash to detect a mismatched or forged copy.
-8. If a host provider is pressured to remove the object, the owner re-hosts the identical bytes elsewhere and publishes a higher-`Seq` Provider Record for the same Object Hash. The original `kad:` link remains unchanged; a later resolution returns the new provider URL. This is the same stable-reference principle described in [Re-host a censored document under a stable content hash](#8-re-host-a-censored-document-under-a-stable-content-hash).
+8. If a host is pressured to remove the object, the owner can re-host the identical bytes elsewhere and publish an updated `provider_urls` list for the same Object Hash; the original `kad:` link remains unchanged, and clients can verify the retrieved bytes against that hash.
 
-**Services involved:** A web page, the proposed Chromium extension, a proposed local resolution bridge, the implemented Registry and its Provider Record path, and ordinary HTTP(S) object hosting.
+**Services involved:** A web page, the proposed Chromium extension and local bridge, the implemented Registry Provider Record path, and external provider transports. The proposed extension opens only HTTP(S) locators.
 
 **Sovereignty and privacy properties:** A publisher can choose the bootstrap Registry multiaddr embedded in a link, and a content owner controls authorized Provider Record updates through the signing key and `Seq` rules. Content addressing decouples the Object Hash from one host and can make re-hosting fluid. Provider Records and link-resolution requests are public or observable according to deployment; this scenario provides no anonymity or private-by-default publication. Decentralized operation does not by itself guarantee censorship resistance, availability, or host persistence.
 
 **Current-versus-future status:** The Provider Record put/get mechanics are implemented through the [Provider Record examples](provider-put-get-examples.md), [protocol concepts](protocol-concepts.md), [multi-node setup](multi-node-cluster-setup.md), and [client key configuration](client-keygen-cli-config.md) guides. The gated `tests/test_acceptance_object_url.py` acceptance test provides supporting evidence for those mechanics when run with `DECENT_REGISTRY_RUN_ACCEPTANCE=1`. The web-page `kad:` link convention, Chromium extension, local bridge, and end-to-end browser flow are documented or researched but unimplemented. The current Registry node is libp2p-only; the HTTP-compatible resolution surface described in the research is a future implementation boundary.
 
-**Limitations:** No Chromium extension or local bridge is shipped. A web page cannot assume that browsers understand `kad:` without the proposed integration. The Registry cannot force a provider to retain content, restore a removed URL, or prevent censorship of every Registry node or provider. At least one reachable provider and a usable Registry path are required. Clients must verify downloaded bytes against the Object Hash. Provider Records are live pointers rather than guaranteed history, and public records are not private by default.
+**Limitations:** No Chromium extension or local bridge is shipped. A web page cannot assume that browsers understand `kad:` without the proposed integration. The Registry cannot force providers to retain content, guarantee multiple locators are independently operated, or prevent censorship of every Registry node or provider. At least one reachable source and a usable Registry path are required. Clients must verify downloaded bytes against the Object Hash. Provider Records
+are live locator lists, not guaranteed history; public records are not private
+by default.
 
 ## Canonical documentation
 

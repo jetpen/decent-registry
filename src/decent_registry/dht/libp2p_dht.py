@@ -33,7 +33,7 @@ from decent_registry.exceptions import (
     ProviderAlreadyWithdrawn,
 )
 from decent_registry.provider_schema import (
-    ProviderPayloadV1,
+    ProviderPayloadV3,
     ProviderWithdrawnPayloadV2,
     decode_provider_payload_dict,
 )
@@ -1429,7 +1429,7 @@ class Libp2pKadDHT:
 
     async def get_signed_provider_record(
         self, object_hash: str, quorum: int = 0
-    ) -> ProviderPayloadV1 | ProviderWithdrawnResult | ProviderRecordResult | None:
+    ) -> ProviderPayloadV3 | ProviderWithdrawnResult | ProviderRecordResult | None:
         record_key = bytes.fromhex(object_hash)
         kad_key = self._kad_key(object_hash)
         raw_dht = await self._read_dht_value(kad_key, quorum=quorum)

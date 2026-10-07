@@ -200,7 +200,7 @@ def draft_identity_bundle(
 def draft_provider_bundle(
     *,
     object_hash: str,
-    provider_url: str,
+    provider_urls: Sequence[str],
     endpoints: Sequence[str],
     owner_public_key: bytes,
     seq: int,
@@ -210,13 +210,12 @@ def draft_provider_bundle(
     predecessor_state_hash: bytes = _ZERO_STATE_HASH,
     operation: int = OPERATION_GENESIS,
     alg: str = "Ed25519",
-    version: int = 1,
 ) -> MultisignatureBundle:
     payload = build_provider_payload_dict(
         alg=alg,
-        version=version,
+        version=3,
         object_hash=object_hash,
-        provider_url=provider_url,
+        provider_urls=list(provider_urls),
         endpoints=list(endpoints),
     )
     return draft_bundle(

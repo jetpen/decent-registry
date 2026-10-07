@@ -527,7 +527,7 @@ def test_cli_put_get_finalized_envelopes_without_private_keys(tmp_path: Path):
     provider_envelope = _finalize_bundle(
         draft_provider_bundle(
             object_hash=object_hash,
-            provider_url="https://example.com/finalized.bin",
+            provider_urls=["https://example.com/finalized.bin", "ipfs://bafybeigdyrzt5sfp7udm7hu76uh6xj4kqkv4m5fghs7m2aqpf3sxj5a6x4"],
             endpoints=["/ip4/127.0.0.1/tcp/9001"],
             owner_public_key=keypairs[0].public_key.to_bytes(),
             seq=1,
@@ -591,8 +591,8 @@ def test_cli_put_get_finalized_envelopes_without_private_keys(tmp_path: Path):
     assert provider_record["object_key"] == object_hash
     assert provider_record["object_hash"] == object_hash
     assert provider_record["alg"] == "Ed25519"
-    assert provider_record["version"] == 1
-    assert provider_record["provider_url"] == "https://example.com/finalized.bin"
+    assert provider_record["version"] == 3
+    assert provider_record["provider_urls"] == ["https://example.com/finalized.bin", "ipfs://bafybeigdyrzt5sfp7udm7hu76uh6xj4kqkv4m5fghs7m2aqpf3sxj5a6x4"]
     assert provider_record["seq"] == 1
     assert provider_record["authorization"]["threshold"] == 2
 
@@ -643,7 +643,7 @@ def test_cli_put_get_finalized_envelopes_without_private_keys(tmp_path: Path):
         _finalize_bundle(
             draft_provider_bundle(
                 object_hash=object_hash,
-                provider_url="https://example.com/stale.bin",
+                provider_urls=["https://example.com/stale.bin"],
                 endpoints=["/ip4/127.0.0.1/tcp/9002"],
                 owner_public_key=keypairs[0].public_key.to_bytes(),
                 seq=1,
@@ -688,14 +688,14 @@ def test_cli_put_get_finalized_envelopes_without_private_keys(tmp_path: Path):
         ]
     )
     assert get_after_stale.returncode == 0
-    assert json.loads(get_after_stale.stdout)["provider_url"] == "https://example.com/finalized.bin"
+    assert json.loads(get_after_stale.stdout)["provider_urls"] == ["https://example.com/finalized.bin", "ipfs://bafybeigdyrzt5sfp7udm7hu76uh6xj4kqkv4m5fghs7m2aqpf3sxj5a6x4"]
 
     invalid_provider_hash = "c" * 64
     invalid_provider_path = tmp_path / "invalid-provider.cbor"
     invalid_provider_path.write_bytes(
         draft_provider_bundle(
             object_hash=invalid_provider_hash,
-            provider_url="https://example.com/never-published.bin",
+            provider_urls=["https://example.com/never-published.bin"],
             endpoints=["/ip4/127.0.0.1/tcp/9003"],
             owner_public_key=keypairs[0].public_key.to_bytes(),
             seq=1,

@@ -125,22 +125,27 @@ Key derivation and owner binding:
 
 Stored as a SignedUpdate where:
 - `record_fields[1]` = `owner_public_key` bytes (Ed25519 public key bytes)
-- `payload` includes the active v1 provider fields:
+- `payload` for an active Provider Record v3 includes:
   - `1`: `alg` (currently `Ed25519`)
-  - `2`: `version` (`1`)
+  - `2`: `version` (`3`)
   - `3`: `object_hash` (64-hex string)
-  - `4`: `provider_url` (downloadable object URL, max 2048 UTF-8 bytes)
-  - `5`: `endpoints` (list<string>, sorted)
+  - `4`: `provider_urls` (list of 1–32 unique absolute URIs, sorted; each at most 2048 UTF-8 bytes)
+  - `5`: `endpoints` (list<string>, sorted; multiaddrs remain separate from provider URI locators)
+
+Provider URI locators may use any syntactically valid URI scheme. The Registry
+validates and returns them but does not fetch them or implement scheme-specific
+protocol handlers. Clients are responsible for supported schemes and verifying
+retrieved bytes against `object_hash`. Active v1 payloads are unsupported; old
+records must be republished as v3. The v2 withdrawal tombstone remains unchanged.
 
 A Provider withdrawal is a distinct v2 tombstone payload with fields `1: alg`,
 `2: 2`, `3: object_hash`, `4: "withdrawn"`, and optional `5:
-replacement_object_hash`. It has no URL or endpoints. The active v1 payload,
-SignedUpdate/envelope shape, and signature purpose remain unchanged.
+replacement_object_hash`. It has no provider URLs or endpoints.
 
   #### Provider withdrawal payload v2
 
   An owner-authorized withdrawal is a Provider payload v2 tombstone at the same
-  `/decent-registry/provider/{object_hash}` key. The active v1 payload and its
+  `/decent-registry/provider/{object_hash}` key. The active v3 payload and its
   SignedUpdate signature purpose are unchanged. The canonical tombstone payload
   contains exactly these fields (key 5 is optional):
 
@@ -154,7 +159,7 @@ SignedUpdate/envelope shape, and signature purpose remain unchanged.
   }
   ```
 
-  It contains no provider URL or endpoints. Hashes are 64 hexadecimal
+  It contains no provider URLs or endpoints. Hashes are 64 hexadecimal
   characters, and a replacement cannot point to the withdrawn hash. The
   replacement is an owner-authored pointer; the Registry does not resolve it or
   require that it be active or owned by the same key.
@@ -162,7 +167,7 @@ SignedUpdate/envelope shape, and signature purpose remain unchanged.
   A withdrawal must be a strictly higher-Seq state than a valid active head.
   Legacy records require the bound Owner Public Key. Multisignature records
   require the current threshold and exact predecessor-state hash. A higher-Seq
-  active v1 Provider Record can reactivate the key, after which it may be
+  active v3 Provider Record can reactivate the key, after which it may be
   withdrawn again. Repeated withdrawals fail with `ProviderAlreadyWithdrawn`.
   When the Registry can validate a tombstone, `get provider` returns JSON with
   `status: "withdrawn"`, `object_key`, `seq`, optional
@@ -178,8 +183,8 @@ SignedUpdate/envelope shape, and signature purpose remain unchanged.
 
 On get, the client prints:
 - `object_key` (the queried `object_hash` string)
-- `provider_url`
-- `endpoints` (already validated/sorted)
+- `provider_urls` (validated, sorted URI locator list)
+- `endpoints` (validated/sorted multiaddrs)
 
 ---
 
@@ -302,7 +307,8 @@ multisignature `put`/`get` operations and durable accepted-state installation.
 `decent_registry.multisig_bundle` provides local-only workflow operations:
 
 1. `draft_identity_bundle` or `draft_provider_bundle` creates canonical
-   SignedUpdate bytes and an empty proof collection.
+   SignedUpdate bytes and an empty proof collection. Provider bundle drafts
+   accept 1–32 `provider_urls` and emit active payload v3.
 2. `sign_bundle` accepts exactly one caller-local Ed25519 private key and
    returns a detached proof. The private key is not stored in the bundle.
 3. `merge_proof` verifies exact SignedUpdate binding, signer membership,
@@ -430,12 +436,18 @@ Client CLI flags common to `put`/`get`:
 
 - Inputs:
   - `--object-hash <64-hex>`
-  - `--provider-url <url>`
+  - `--provider-url <absolute-uri>` (repeatable; 1–32 distinct locators)
   - `--owner-privkey <pem path>`
   - `--seq <monotonic int>`
   - `--endpoint <multiaddr>` (repeatable/comma-separated)
-- Provider payload requirements:
-  - endpoints must be valid multiaddr strings starting with `/`
+- The active v3 payload stores sorted `provider_urls` at field `4` and the unchanged sorted multiaddr `endpoints` at field `5`. Clients select supported schemes; the Registry does not fetch locators.
+- `https:foo` is valid as an absolute generic URI even though a consumer may not handle it as an HTTP URL.
+- URI validation accepts RFC 3986 registered-name syntax and is not a DNS hostname policy.
+- payload list requirements:
+  - each value is a valid absolute URI with a scheme and no whitespace
+  - 1–32 distinct locators, each <=2048 UTF-8 bytes
+  - lexicographically sorted before signing
+- endpoints requirements:
   - max 32 endpoints, each <=256 bytes
   - endpoints are sorted lexicographically before signing
 
@@ -444,4 +456,4 @@ Client CLI flags common to `put`/`get`:
 - Inputs:
   - `--object-hash <64-hex>`
 - Output JSON:
-  - `provider_url` and sorted `endpoints`
+  - `provider_urls` and sorted `endpoints`

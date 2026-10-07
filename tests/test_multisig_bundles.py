@@ -51,7 +51,7 @@ def _draft_provider(
 ) -> MultisignatureBundle:
     return draft_provider_bundle(
         object_hash=OBJECT_HASH,
-        provider_url=PROVIDER_URL,
+        provider_urls=[PROVIDER_URL],
         endpoints=["/ip4/127.0.0.1/tcp/9000"],
         owner_public_key=keypairs[0].public_key.to_bytes(),
         seq=seq,
@@ -88,9 +88,9 @@ def test_provider_draft_contains_the_complete_provider_payload():
     assert bundle.record_kind == 2
     assert bundle.signed_update[2] == build_provider_payload_dict(
         alg="Ed25519",
-        version=1,
+        version=3,
         object_hash=OBJECT_HASH,
-        provider_url=PROVIDER_URL,
+        provider_urls=[PROVIDER_URL],
         endpoints=["/ip4/127.0.0.1/tcp/9000"],
     )
 

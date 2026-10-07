@@ -8,8 +8,8 @@
 - Current identity object key derivation:
   - `object_key_hex = sha256(owner_name_bytes).hexdigest()`
 - Provider payload already includes:
-  - `provider_url` (validated to be `http://` or `https://`)
-  - `endpoints` (validated as multiaddrs starting with `/`)
+- Provider payload uses active v3 `provider_urls` and a separate multiaddr
+  `endpoints` list; it no longer stores a singular HTTP-only `provider_url`.
 
 This doc specifies a *custom URL grammar* for a registry service that routes requests to the DHT via:
 1) a protocol scheme identifying the service API,
@@ -139,7 +139,7 @@ Server-side status:
 
 The route is a required URL surface but a follow-up implementation area. Until the reverse index exists, return `501 Not Implemented` rather than silently performing an unbounded scan.
 
-### 4) Provider record lookup returning only the provider record (including target object URL)
+### 4) Provider record lookup returning the provider record and URI locators
 Route:
 - `provider/by-hash/<sha256hex>`
 
@@ -149,22 +149,27 @@ Server-side behavior (current code-backed):
 - Return the provider record payload.
 - If no provider record exists, return HTTP `404 Not Found`.
 
-The payload includes:
-- `provider_url` = URL of the target object.
-- `endpoints` = multiaddrs where the provider can be reached.
+Provider Record lookups return a signed Provider Record containing a sorted list
+of 1–32 unique absolute `provider_urls` and separate multiaddr `endpoints`; each
+locator is at most 2048 UTF-8 bytes. This research specifies a proposed HTTP
+redirect surface, not current Registry behavior. Any future redirect must choose
+only an HTTP(S) locator, never an arbitrary URI scheme.
 
-### 5) Provider lookup returning a redirect to the target object URL
+### 5) Provider lookup returning a redirect to an HTTP(S) target
 Route:
 - `provider/by-hash/<sha256hex>/redirect`
 
 Server-side behavior:
 - Fetch provider record (same as #4).
-- Set `Location` header to `provider_url`.
-- Return `302 Found` with `Location` set to the validated `provider_url`.
-- When no provider record exists, respond `404 Not Found` with no redirect.
+- Select an HTTP(S) locator from `provider_urls` and set `Location` to that value.
+- Return `302 Found`; return `404 Not Found` when no provider record exists.
+- If no HTTP(S) locator exists, return a documented non-redirect response;
+  never pass an unsupported URI scheme to the browser as a redirect.
 
-Security note:
-- `provider_url` is validated to start with `http://` or `https://` by the provider schema; this reduces open-redirect risk.
+A Registry URL implementation should restrict redirects to HTTP(S) locators from
+`provider_urls`; active Provider Records accept other URI schemes for generic
+clients, so schema validation alone does not make every locator a browser-safe
+redirect target.
 
 ## Concrete example URLs
 

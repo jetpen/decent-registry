@@ -19,7 +19,7 @@ from decent_registry.encoding import (
 )
 from decent_registry.exceptions import ProviderAlreadyWithdrawn
 from decent_registry.provider_schema import (
-    ProviderPayloadV1,
+    ProviderPayloadV3,
     ProviderWithdrawnPayloadV2,
     decode_provider_payload_dict,
 )
