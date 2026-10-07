@@ -25,12 +25,11 @@ def _parse_hex_bytes(value: str, *, name: str) -> bytes:
 def build_provider_envelope(
     *,
     object_hash: str,
-    provider_url: str,
+    provider_urls: list[str],
     owner_privkey_pem_path: str,
     seq: int,
     endpoints: list[str],
     alg: str = "Ed25519",
-    version: int = 1,
 ) -> bytes:
     """Deep module: builds the canonical SignedUpdate -> Ed25519 signature ->
     canonical signed envelope bytes for a provider record.
@@ -44,9 +43,9 @@ def build_provider_envelope(
 
     payload_dict: dict[int, Any] = build_provider_payload_dict(
         alg=alg,
-        version=version,
+        version=3,
         object_hash=object_hash,
-        provider_url=provider_url,
+        provider_urls=provider_urls,
         endpoints=endpoints,
     )
 

@@ -168,7 +168,7 @@ def test_provider_put_and_get_validate_multisig_payload_and_metadata():
     record_key = bytes.fromhex(OBJECT_HASH)
     bundle = draft_provider_bundle(
         object_hash=OBJECT_HASH,
-        provider_url=PROVIDER_URL,
+        provider_urls=[PROVIDER_URL],
         endpoints=["/ip4/127.0.0.1/tcp/9000"],
         owner_public_key=keypairs[0].public_key.to_bytes(),
         seq=1,
@@ -190,7 +190,7 @@ def test_provider_put_and_get_validate_multisig_payload_and_metadata():
         envelope_cbor=envelope,
     )
     assert resolved.payload.object_hash == OBJECT_HASH
-    assert resolved.payload.provider_url == PROVIDER_URL
+    assert resolved.payload.provider_urls == [PROVIDER_URL]
     assert resolved.authorization is not None
     assert resolved.authorization.threshold == 2
 

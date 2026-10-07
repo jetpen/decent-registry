@@ -101,7 +101,7 @@ Common:
 - `--object-hash <64-hex>`
 
 `legacy mode` requires:
-- `--provider-url <url>`
+- at least one `--provider-url <uri>` (repeatable)
 - `--owner-privkey <owner_privkey_pem_path>`
 - `--seq <monotonic int>`
 - optional `--endpoint <multiaddr>` (repeatable; also accepts comma-separated)
@@ -117,7 +117,8 @@ decent-registry put provider \
   --host 127.0.0.1 --port <node_port> \
   --bootstrap <bootstrap> \
   --object-hash <64-hex> \
-  --provider-url <url> \
+  --provider-url <URI_1> \
+  --provider-url <URI_2> \
   --owner-privkey <owner_privkey_pem_path> \
   --seq 1 \
   --endpoint /ip4/127.0.0.1/tcp/9000
@@ -137,10 +138,6 @@ Publishes a signed **identity update** under the DHT key:
 Common:
 - `--host`, `--port`, `--bootstrap`
 - `--owner-name <hex bytes>`
-
-`legacy mode` requires:
-- `--owner-privkey <owner_privkey_pem_path>`
-- `--seq <monotonic int>`
 
 Finalized mode requires:
 - `--finalized-envelope <path>`
@@ -188,7 +185,7 @@ On success prints JSON:
 - `object_key`: the queried DHT key
 - `object_hash`
 - `alg` and payload `version`
-- `provider_url`
+- `provider_urls`
 - `endpoints`: normalized/sorted provider endpoints
 - `seq` and `authorization` for version-1 multisignature records; `authorization` includes the Signer Set, threshold, epoch, operation, predecessor-state hash, and accepted state hash
 

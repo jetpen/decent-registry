@@ -146,7 +146,7 @@ def test_provider_record_stores_downloadable_object_url(tmp_path):
 
     record = json.loads(get_res.stdout)
     assert record["object_key"] == obj_hash
-    assert record["provider_url"] == provider_url
+    assert record["provider_urls"] == [provider_url]
 
     # Optional: verify the URL is actually a downloadable binary (ELF magic).
     if os.getenv("DECENT_REGISTRY_RUN_ACCEPTANCE_DOWNLOAD") == "1":

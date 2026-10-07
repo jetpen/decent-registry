@@ -40,7 +40,7 @@ Use the vocabulary in [`CONTEXT.md`](../CONTEXT.md) and [protocol concepts](prot
 - **SignedUpdate** is the canonical record data containing `record_fields`, a `payload`, and monotonic `seq`; its bytes are bound to the Ed25519 signature.
 - **SignedEnvelope** is the canonical CBOR wrapper containing SignedUpdate bytes and the signature. It is the DHT value that is stored and transported.
 - **Identity Record** binds an Owner Name to an Owner Public Key. Its DHT key is derived from the owner-name bytes.
-- **Provider Record** binds an Object Hash to a provider URL and sorted multiaddr endpoints.
+- **Provider Record** binds an Object Hash to `provider_urls` and sorted multiaddr `endpoints`; consumers choose supported URI schemes and verify retrieved content against the Object Hash.
 - **Owner Name** is the byte-string identity input used to derive an Identity Record key.
 - **Owner Public Key** is the Ed25519 public key used for signature verification and owner binding.
 - **Object Key** is the lookup key for an Identity Record. **Object Hash** is the SHA-256 hex key input for a Provider Record.
@@ -102,7 +102,8 @@ decent-registry put provider \
   --host 127.0.0.1 --port <CLIENT_PORT> \
   --bootstrap <SEED_LISTEN_MULTIADDR>/p2p/<SEED_PEER_ID> \
   --object-hash <OBJECT_HASH_64_HEX> \
-  --provider-url <HTTPS_OR_HTTP_URL> \
+  --provider-url <HTTPS_URI> \
+  --provider-url <IPFS_URI> \
   --owner-privkey ~/.decent/owner_privkey.pem \
   --seq 1 \
   --endpoint /ip4/127.0.0.1/tcp/<SERVICE_PORT>
@@ -113,7 +114,7 @@ decent-registry get provider \
   --object-hash <OBJECT_HASH_64_HEX>
 ```
 
-`--bootstrap` may be repeated or comma-separated. It must contain `/p2p/<peer_id>`. Provider endpoints are repeatable, must begin with `/`, and are normalized into sorted order before signing. `put` updates require strictly increasing `--seq` and preserve Owner Binding. These snippets use placeholders intentionally; the canonical examples contain the complete local end-to-end scripts.
+`--bootstrap` may be repeated or comma-separated. It must contain `/p2p/<peer_id>`. Provider endpoints are repeatable, must begin with `/`, and are normalized into sorted order before signing. Provider URIs are repeatable, validated generically, and normalized before signing. `put` updates require strictly increasing `--seq` and preserve Owner Binding. These snippets use placeholders intentionally; the canonical examples contain the complete local end-to-end scripts.
 
 ## 6. Python API integration
 
@@ -136,7 +137,7 @@ async def main() -> None:
 
         await service.put_provider(
             object_hash="<OBJECT_HASH_64_HEX>",
-            provider_url="<HTTPS_OR_HTTP_URL>",
+            provider_urls=["<HTTPS_URI>", "<IPFS_URI>"],
             owner_privkey_pem_path="/secure/path/owner_privkey.pem",
             seq=1,
             endpoints=["/ip4/127.0.0.1/tcp/<SERVICE_PORT>"],

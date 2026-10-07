@@ -69,9 +69,9 @@ def test_validate_provider_overwrite_with_prev_seq_allows_increase():
     endpoints = ["/ip4/2/tcp/1", "/ip4/1/tcp/9", "/ip4/1/tcp/1"]
     payload_dict = build_provider_payload_dict(
         alg="Ed25519",
-        version=1,
+        version=3,
         object_hash=object_hash_hex,
-        provider_url=PROVIDER_URL,
+        provider_urls=[PROVIDER_URL],
         endpoints=endpoints,
     )
 
@@ -119,9 +119,9 @@ def test_validate_provider_overwrite_rejects_old_seq():
 
     payload_dict = build_provider_payload_dict(
         alg="Ed25519",
-        version=1,
+        version=3,
         object_hash=object_hash_hex,
-        provider_url=PROVIDER_URL,
+        provider_urls=[PROVIDER_URL],
         endpoints=["/ip4/1/tcp/1"],
     )
 
@@ -235,9 +235,9 @@ def test_validate_provider_get_returns_decoded_provider_payload():
     endpoints = ["/ip4/2/tcp/1", "/ip4/1/tcp/9", "/ip4/1/tcp/1"]
     payload_dict = build_provider_payload_dict(
         alg="Ed25519",
-        version=1,
+        version=3,
         object_hash=object_hash_hex,
-        provider_url=PROVIDER_URL,
+        provider_urls=[PROVIDER_URL],
         endpoints=endpoints,
     )
 
@@ -257,7 +257,7 @@ def test_validate_provider_get_returns_decoded_provider_payload():
     payload = v.validate_provider_get(record_key=record_key, envelope_cbor=env)
 
     assert payload.object_hash == object_hash_hex
-    assert payload.provider_url == PROVIDER_URL
+    assert payload.provider_urls == [PROVIDER_URL]
     # Provider schema normalizes/sorts endpoints.
     assert payload.endpoints == sorted(endpoints)
 
@@ -271,9 +271,9 @@ def test_validate_provider_overwrite_rejects_lookup_key_mismatch():
 
     payload_dict = build_provider_payload_dict(
         alg="Ed25519",
-        version=1,
+        version=3,
         object_hash=object_hash_hex,
-        provider_url=PROVIDER_URL,
+        provider_urls=[PROVIDER_URL],
         endpoints=["/ip4/1/tcp/1"],
     )
 
@@ -306,9 +306,9 @@ def test_validate_provider_get_rejects_noncanonical_envelope():
 
     payload_dict = build_provider_payload_dict(
         alg="Ed25519",
-        version=1,
+        version=3,
         object_hash=object_hash_hex,
-        provider_url=PROVIDER_URL,
+        provider_urls=[PROVIDER_URL],
         endpoints=["/ip4/1/tcp/1"],
     )
 

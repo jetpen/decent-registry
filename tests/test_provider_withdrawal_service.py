@@ -69,7 +69,7 @@ def test_service_withdraw_provider_submits_legacy_and_returns_withdrawn_lookup(t
     )
     active = build_provider_envelope(
         object_hash=hashlib.sha256(b"service-object").hexdigest(),
-        provider_url="https://example.com/active.bin",
+        provider_urls=["https://example.com/active.bin"],
         owner_privkey_pem_path=str(key_path),
         seq=1,
         endpoints=["/ip4/127.0.0.1/tcp/9000"],
@@ -107,7 +107,7 @@ def test_service_withdraw_provider_submits_finalized_threshold_envelope(tmp_path
     object_hash = hashlib.sha256(b"multisig-withdrawal-object").hexdigest()
     active_bundle = draft_provider_bundle(
         object_hash=object_hash,
-        provider_url="https://example.com/active.bin",
+        provider_urls=["https://example.com/active.bin"],
         endpoints=["/ip4/127.0.0.1/tcp/9000"],
         owner_public_key=keypairs[0].public_key.to_bytes(),
         seq=4,

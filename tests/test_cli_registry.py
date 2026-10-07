@@ -110,6 +110,7 @@ def test_cli_put_get_round_trip_libp2p_kad_dht(tmp_path):
     owner_priv_pem_path, _ = _write_ed25519_privkey_pem(tmp_path)
 
     endpoints = ["/ip4/127.0.0.1/tcp/9999"]
+    provider_urls = [provider_url, "ipfs://example-content-cid"]
 
     put_res = _run_cli(
         [
@@ -124,7 +125,9 @@ def test_cli_put_get_round_trip_libp2p_kad_dht(tmp_path):
             "--object-hash",
             obj,
             "--provider-url",
-            provider_url,
+            provider_urls[0],
+            "--provider-url",
+            provider_urls[1],
             "--owner-privkey",
             owner_priv_pem_path,
             "--seq",
@@ -153,7 +156,7 @@ def test_cli_put_get_round_trip_libp2p_kad_dht(tmp_path):
 
     record = json.loads(get_res.stdout)
     assert record["object_key"] == obj
-    assert record["provider_url"] == provider_url
+    assert record["provider_urls"] == sorted(provider_urls)
     assert record["endpoints"] == _normalize_endpoints(endpoints)
 
 
@@ -260,7 +263,7 @@ def test_cli_seq_monotonic_overwrite_libp2p_kad_dht(tmp_path):
 
     record = json.loads(get_res.stdout)
     assert record["object_key"] == obj
-    assert record["provider_url"] == provider_url
+    assert record["provider_urls"] == [provider_url]
     assert record["endpoints"] == _normalize_endpoints(endpoints_2)
 
 

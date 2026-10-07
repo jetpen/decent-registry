@@ -97,11 +97,13 @@ OBJECT_HASH="$(sha256sum curl-8.7.1.tar.gz | awk '{print $1}')"
 # OBJECT_HASH must equal:
 # f91249c87f68ea00cf27c44fdfa5a78423e41e71b7d408e5901a9896d905c495
 
-# 3) Provide the downloadable object URL itself (field 4 in the provider payload)
+# 3) Provide one or more provider URI locators for the downloadable object
 
-PROVIDER_URL="https://github.com/curl/curl/releases/download/curl-8_7_1/curl-8.7.1.tar.gz"
-
-# Put seq=1
+PROVIDER_URLS=(
+  "https://github.com/curl/curl/releases/download/curl-8_7_1/curl-8.7.1.tar.gz"
+  # Replace the sample CID with the actual content CID for this artifact.
+  "ipfs://example-content-cid"
+)
 
 # Note: --bootstrap origin
 # - Start a seed node
@@ -114,15 +116,22 @@ decent-registry put provider \
   --port <CLIENT_PORT> \
   --bootstrap <SEED_LISTEN_MULTIADDR>/p2p/<SEED_PEERID> \
   --object-hash "$OBJECT_HASH" \
-  --provider-url "$PROVIDER_URL" \
+  --provider-url "${PROVIDER_URLS[0]}" \
+  --provider-url "${PROVIDER_URLS[1]}" \
   --owner-privkey ~/.decent/owner_privkey.pem \
   --seq 1 \
   --endpoint /ip4/127.0.0.1/tcp/9000
 ```
 
-### Endpoint validation and signing
+### Provider URI validation
 
-From `src/decent_registry/provider_schema.py`:
+`RFC 3986` URI parsing preserves scheme-specific productions: authority syntax
+is validated by the shared `_validate_uri_authority` helper, while path and query
+characters are checked against the absolute-URI component grammar. Fragments
+are excluded from provider locators. The validator also checks percent escapes,
+IP literals, and authority ports.
+
+### Multiaddr endpoint validation and signing
 
 - `--endpoint` values are repeatable and are merged by the CLI into a list (comma-separated supported by the CLI).
 - Each endpoint must:
@@ -138,11 +147,15 @@ So: the payload committed to the signature always uses `endpoints = sorted(endpo
 - `--host`/`--port` in `put provider` / `get provider` define the client’s temporary libp2p node listen address used to join the Kad-DHT (via `--bootstrap`).
 - `--endpoint` values are the provider’s advertised service locations (multiaddrs) stored in the provider record payload and returned by `get provider`.
 
-### What `provider_url` represents
+### What `provider_urls` represent
 
-- `provider_url` is stored in the provider payload as field `4`.
-- It is the downloadable object URL (must be `http://` or `https://`).
-- It is validated to be ≤ 2048 UTF-8 bytes.
+`provider_urls` is stored at payload field `4` as a sorted list of 1–32 unique
+absolute URIs, each at most 2048 UTF-8 bytes. Locators must have a URI scheme,
+contain no whitespace, and pass the URI syntax checks described above. The
+Registry does not fetch locators or implement scheme handlers; consumers select
+supported schemes and verify retrieved bytes against the Object Hash. A
+syntactically valid local URI such as `file:///...` may not be useful across
+hosts; locator availability and distribution are not guaranteed.
 
 ---
 
@@ -169,11 +182,12 @@ On success, stdout is a single JSON object (`json.dumps(..., indent=2, sort_keys
 
 ```json
 {
-  "object_key": "f91249c87f68ea00cf27c44fdfa5a78423e41e71b7d408e5901a9896d905c495",
-  "provider_url": "<URL>",
-  "endpoints": ["<multiaddr>", ...]
+  "object_key": "<OBJECT_HASH>",
+  "provider_urls": ["<URI_1>", "<URI_2>"],
+  "endpoints": ["<MULTIADDR_1>"]
 }
 ```
+
 
 - `endpoints` are returned in the normalized/sorted form.
 
@@ -311,11 +325,13 @@ else:
 
 obj = "f91249c87f68ea00cf27c44fdfa5a78423e41e71b7d408e5901a9896d905c495"
 provider_url = "https://github.com/curl/curl/releases/download/curl-8_7_1/curl-8.7.1.tar.gz"
-
+# Replace the sample CID with the actual content CID for this artifact.
+provider_urls = [provider_url, "ipfs://example-content-cid"]
 endpoints = [
     "/ip4/127.0.0.1/tcp/10002",
     "/ip4/127.0.0.1/tcp/10001",  # intentionally unsorted
 ]
+expected_provider_urls = sorted(provider_urls)
 expected_endpoints = sorted(endpoints)
 
 with tempfile.TemporaryDirectory() as td:
@@ -342,7 +358,8 @@ with tempfile.TemporaryDirectory() as td:
         "--port", str(client_port_1),
         "--bootstrap", seed_bootstrap,
         "--object-hash", obj,
-        "--provider-url", provider_url,
+        "--provider-url", provider_urls[0],
+        "--provider-url", provider_urls[1],
         "--owner-privkey", str(owner_priv_pem_path),
         "--seq", "1",
         "--endpoint", ",".join(endpoints),
@@ -356,7 +373,8 @@ with tempfile.TemporaryDirectory() as td:
         "--port", str(client_port_2),
         "--bootstrap", seed_bootstrap,
         "--object-hash", obj,
-        "--provider-url", provider_url,
+        "--provider-url", provider_urls[0],
+        "--provider-url", provider_urls[1],
         "--owner-privkey", str(owner_priv_pem_path),
         "--seq", "2",
         "--endpoint", ",".join(endpoints),
@@ -371,7 +389,8 @@ with tempfile.TemporaryDirectory() as td:
         "--port", str(client_port_3),
         "--bootstrap", seed_bootstrap,
         "--object-hash", obj,
-        "--provider-url", provider_url,
+        "--provider-url", provider_urls[0],
+        "--provider-url", provider_urls[1],
         "--owner-privkey", str(owner_priv_pem_path),
         "--seq", "1",
         "--endpoint", ",".join(endpoints),
@@ -390,7 +409,7 @@ with tempfile.TemporaryDirectory() as td:
 
     record = json.loads(get1.stdout)
     assert record["object_key"] == obj
-    assert record["provider_url"] == provider_url
+    assert record["provider_urls"] == expected_provider_urls
     assert record["endpoints"] == expected_endpoints
 
     print(json.dumps(record, indent=2, sort_keys=True))

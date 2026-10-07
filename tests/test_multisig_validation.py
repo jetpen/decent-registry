@@ -86,9 +86,9 @@ def _provider_payload() -> dict[int, Any]:
     object_hash = hashlib.sha256(b"object-bytes").hexdigest()
     return build_provider_payload_dict(
         alg="Ed25519",
-        version=1,
+        version=3,
         object_hash=object_hash,
-        provider_url=PROVIDER_URL,
+        provider_urls=[PROVIDER_URL],
         endpoints=["/ip4/127.0.0.1/tcp/9000"],
     )
 

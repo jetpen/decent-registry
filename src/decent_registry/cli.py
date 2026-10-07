@@ -73,6 +73,11 @@ def _parse_endpoints(values: list[str]) -> list[str]:
     return eps
 
 
+def _normalize_provider_uris(values: list[str] | None) -> list[str]:
+    """Return an empty list for omitted provider URI locators."""
+    return [] if values is None else values
+
+
 _OPERATION_NAMES = {
     "genesis": OPERATION_GENESIS,
     "ordinary-update": OPERATION_ORDINARY_UPDATE,
@@ -165,11 +170,11 @@ def _bundle_draft_command(args: argparse.Namespace) -> int:
                 alg=args.alg,
             )
         else:
-            if args.provider_url is None:
-                raise ValueError("Provider draft requires --provider-url unless --withdrawal is set")
+            if not _normalize_provider_uris(args.provider_urls):
+                raise ValueError("Provider draft requires at least one --provider-url unless --withdrawal is set")
             bundle = draft_provider_bundle(
                 object_hash=object_hash,
-                provider_url=args.provider_url,
+                provider_urls=_normalize_provider_uris(args.provider_urls),
                 endpoints=_parse_endpoints(args.endpoint),
                 owner_public_key=owner_public_key,
                 seq=args.seq,
@@ -179,7 +184,6 @@ def _bundle_draft_command(args: argparse.Namespace) -> int:
                 predecessor_state_hash=predecessor_state_hash,
                 operation=operation,
                 alg=args.alg,
-                version=args.payload_version,
             )
     _write_cli_bytes(args.output, bundle.to_cbor(), description="bundle output")
     return 0
@@ -387,12 +391,12 @@ def _put_provider_command(args: argparse.Namespace) -> int:
     args.verbose = client_cfg.verbosity
 
     if args.finalized_envelope is None:
-        if args.provider_url is None or args.seq is None:
-            logger.error("legacy provider submission requires --provider-url and --seq")
+        if not _normalize_provider_uris(args.provider_urls) or args.seq is None:
+            logger.error("legacy provider submission requires at least one --provider-url and --seq")
             return 1
         args.owner_privkey = resolve_required_owner_privkey_pem_path(client_cfg)
     elif (
-        args.provider_url is not None
+        _normalize_provider_uris(args.provider_urls)
         or args.owner_privkey is not None
         or args.endpoint
         or args.seq is not None
@@ -423,12 +427,11 @@ def _put_provider_command(args: argparse.Namespace) -> int:
             else:
                 await service.put_provider(
                     object_hash=args.object_hash,
-                    provider_url=args.provider_url,
+                    provider_urls=_normalize_provider_uris(args.provider_urls),
                     owner_privkey_pem_path=args.owner_privkey,
                     seq=int(args.seq) if args.seq is not None else 1,
                     endpoints=endpoints,
                     alg="Ed25519",
-                    version=1,
                 )
             print(1)
             return 0
@@ -436,7 +439,7 @@ def _put_provider_command(args: argparse.Namespace) -> int:
     try:
         return trio.run(_async_put)
     except Exception:
-        logger.error("put provider failed")
+        logger.exception("put provider failed")
         print("put failed")
         return 1
 
@@ -480,7 +483,7 @@ def _get_provider_command(args: argparse.Namespace) -> int:
                 else:
                     payload = {
                         "object_key": args.object_hash,
-                        "provider_url": provider_payload.provider_url,
+                        "provider_urls": provider_payload.provider_urls,
                         "endpoints": provider_payload.endpoints,
                     }
             print(json.dumps(payload, indent=2, sort_keys=True))
@@ -708,14 +711,20 @@ def main(argv: list[str] | None = None) -> None:
         "provider", help="Draft a Provider Record Multisignature Bundle"
     )
     bundle_draft_provider_p.add_argument("--object-hash", required=True)
-    bundle_draft_provider_p.add_argument("--provider-url", required=False)
+    bundle_draft_provider_p.add_argument(
+        "--provider-url",
+        dest="provider_urls",
+        action="append",
+        default=None,
+        required=False,
+        help="Provider URI locator; may repeat",
+    )
     bundle_draft_provider_p.add_argument("--withdrawal", action="store_true")
     bundle_draft_provider_p.add_argument("--replacement-object-hash")
     bundle_draft_provider_p.add_argument(
         "--endpoint", action="append", default=[], help="Provider multiaddr"
     )
     bundle_draft_provider_p.add_argument("--alg", default="Ed25519")
-    bundle_draft_provider_p.add_argument("--payload-version", type=int, default=1)
     _add_bundle_draft_common(bundle_draft_provider_p)
 
     bundle_sign_p = bundle_sub.add_parser(
@@ -751,9 +760,10 @@ def main(argv: list[str] | None = None) -> None:
             "Publish a signed provider record under `--object-hash` (DHT key).\n\n"
             "Required:\n"
             "- --object-hash <64-hex>\n"
-            "- legacy mode: --provider-url, --owner-privkey, and --seq\n"
-            "- finalized mode: --finalized-envelope <path>\n\n"
-            "Optional in legacy mode:\n"
+            "- active payload version 3: repeat --provider-url for each locator\n"
+            "- --owner-privkey <path> and --seq <monotonic int>\n"
+            "- --finalized-envelope <path> for an already-signed update\n\n"
+            "Optional:\n"
             "- --endpoint <multiaddr> (repeatable/comma-separated)"
         ),
         formatter_class=argparse.RawTextHelpFormatter,
@@ -766,7 +776,13 @@ def main(argv: list[str] | None = None) -> None:
     _add_network_args(put_provider_p)
     _add_datastore_args(put_provider_p)
     put_provider_p.add_argument("--object-hash", dest="object_hash", required=True)
-    put_provider_p.add_argument("--provider-url", dest="provider_url", required=False)
+    put_provider_p.add_argument(
+        "--provider-url",
+        dest="provider_urls",
+        action="append",
+        default=None,
+        help="Provider URI locator; may repeat",
+    )
     put_provider_p.add_argument(
         "--owner-privkey",
         dest="owner_privkey",

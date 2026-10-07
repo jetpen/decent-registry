@@ -1,7 +1,6 @@
 # Research: Chromium extension for resolving `kad:<MA>//<context>` and rendering objects (#70)
 
-## Problem statement
-Given a URL in the repo-defined grammar (from `docs/research/registry-url-format.md`), a Chromium browser should be able to fetch/resolve it and render the target object in the browser.
+It documents a proposed browser integration, not current Registry functionality.
 
 Repo URL grammar (v0 proposal):
 - `kad:<multiaddr>//<context-path>[?<query>]`
@@ -9,14 +8,14 @@ Repo URL grammar (v0 proposal):
 - Custom parsing is required (cannot rely on standard URI “authority” parsing).
 
 The registry service returns, depending on route:
-- Identity/Provider *records*; and/or
-- A *redirect* to an HTTP(S) `provider_url` (provider record payload includes `provider_url`).
+- Identity/Provider records using current schemas; the Provider Record contains `provider_urls` and separate multiaddr `endpoints`.
+- A proposed redirect, if implemented, must select an HTTP(S) locator from `provider_urls`.
 
 Since the registry URLs are not standard `http(s)` resources, Chrome extensions cannot simply “GET the custom scheme”.
 
 ## Hard constraints from Chromium extension APIs
 ### 1) `chrome.webRequest` cannot see custom schemes
-`chrome.webRequest` only exposes a limited set of schemes; it explicitly lists accessible schemes as `http://`, `https://`, `ftp://`, `file://`, `ws://`, `wss://`, `urn:`, `chrome-extension://`.
+The above allows `http://`, `https://`, `ftp://`, `ws://`, `wss://`, `urn:`, and `chrome-extension://`. It does not make a generic `file://` URI a portable Provider Record locator.
 Source: https://developer.chrome.com/docs/extensions/reference/api/webRequest
 
 ### 2) `chrome.declarativeNetRequest` cannot rewrite to custom schemes
@@ -47,13 +46,7 @@ Source: https://developer.mozilla.org/en-US/docs/Web/API/Navigator/registerProto
 Therefore: an extension must not rely on intercepting navigation to `kad:` via network APIs.
 
 ## Key enabling fact from this repo
-Provider payload includes `provider_url` and endpoints.
-- The provider URL is validated to start with `http://` or `https://`.
-Source: `src/decent_registry/provider_schema.py` (`_validate_object_url`)
-
-Therefore a practical rendering path is:
-1) Resolve the `kad:` URL to either a provider record or directly a redirect.
-2) Navigate or fetch the returned `provider_url` using normal browser HTTP(S).
+Provider Records return validated `provider_urls` plus separate multiaddr `endpoints`. URI schemes are protocol-agnostic; clients must choose a scheme they can access and verify returned bytes against the Object Hash. The proposed browser flow opens only HTTP(S) locators. Other schemes require separate handlers that are not implemented here.
 
 ## Recommended extension architecture (MV3)
 ### Overview
@@ -62,14 +55,15 @@ Use a **content script** to capture `kad:` links on regular web pages, and a **s
 Recommended bridge choices (either):
 - **A. Local HTTP gateway** (best UX + simplest rendering):
   - Extension calls `http://127.0.0.1:<port>/resolve?...`.
-  - Gateway talks to the DHT and returns JSON with either `{ provider_url }` or `{ "redirect" }`.
-  - Extension then navigates to `provider_url` or returns fetched bytes into a renderer.
+  - Gateway talks to the DHT and returns the verified Provider Record, including `provider_urls`, or a future redirect response.
+  - For navigation, the extension selects only an HTTP(S) locator from the returned list.
+  - A future redirect implementation must likewise select an HTTP(S) locator; the Registry itself must not treat every URI scheme as a browser-safe redirect.
 
 - **B. Native messaging host** (if you prefer not to run an HTTP gateway):
   - Extension talks to a native app via `chrome.runtime.connectNative` / `sendNativeMessage`.
   - Native app performs DHT lookups and returns resolved data.
 
-Both are compatible; option A is usually preferred because object rendering still requires HTTP(S) fetches.
+Both are compatible; the extension's direct navigation mode is limited to HTTP(S) locators. Other schemes need a separate handler; any bridge that retrieves bytes must do so under explicit security controls.
 
 ### Why content script + service worker
 - Content scripts can detect anchor clicks and link attributes (DOM access).
@@ -96,19 +90,19 @@ Source: https://developer.chrome.com/docs/extensions/develop/concepts/native-mes
      - `identity/by-name/<owner-name>`: compute identity key (sha256(owner_name_bytes)).
      - `identity/by-alias/<alias>`: resolve v2 primary/alias semantics (requires v2 validator implementation).
      - `identity/by-owner-pubkey/<pubkey>`: requires future reverse index; until implemented, return 501.
-     - `provider/by-hash/<H>`: return provider record (including `provider_url`).
-     - `provider/by-hash/<H>/redirect`: return redirect `Location` == validated `provider_url`.
+     - `provider/by-hash/<H>`: return the Provider Record, including `provider_urls` and multiaddr `endpoints`.
+     - A proposed `/redirect` route may select an HTTP(S) locator only; generic URI schemes are not automatically safe browser redirect targets.
 
 4) Service worker rendering:
-   - If redirect/provider_url is present: `chrome.tabs.create({ url: provider_url })` OR `window.location = provider_url` from an injected view.
-   - If bridge returns bytes (future v3): create `Blob` + object URL and open/render.
+   - If selecting a provider location, open only a caller-selected HTTP(S) locator. Non-HTTP schemes require another handler, which is outside the proposed extension.
+   - If a future bridge returns bytes, create a `Blob` + object URL and open/render.
 
-Given repo constraints, object bytes should generally come from `provider_url` over HTTP(S).
+Given browser support constraints, the proposed extension should open only HTTP(S) locators. Other URI schemes require an external handler that is out of scope.
 
 ## Rendering strategy (two modes)
    ### Mode A: Navigation (recommended)
-   - Resolve `kad:` → `provider_url` (or redirect `Location`).
-   - Let Chromium perform the GET for the returned `provider_url` using normal browser navigation.
+   - Resolve `kad:` → the Provider Record, then select an HTTP(S) locator from `provider_urls`.
+   - Let Chromium perform the GET for that HTTP(S) locator using normal browser navigation.
    - Pros: no extension-side MIME handling, CSP/CORS handled by the browser as usual.
 
    ### Mode B: Fetch-and-render inside extension UI (optional)
@@ -127,14 +121,14 @@ Given repo constraints, object bytes should generally come from `provider_url` o
 ## End-to-end example (navigation mode)
    Assume:
    - registry URL to resolve: `kad:/ip4/127.0.0.1/tcp/9000/p2p/<PEERID>//provider/by-hash/<H>/redirect`
-   - DHT route `/decent-registry/provider/<H>` holds a provider record whose `provider_url` is `https://example.com/object.bin`.
+   - DHT route `/decent-registry/provider/<H>` holds a Provider Record whose `provider_urls` includes `https://example.com/object.bin`.
 
    Flow:
    1) User clicks a link with that `href` on a normal HTTPS page.
    2) Content script prevents default navigation and sends the raw `kad:` URL to the service worker.
    3) Service worker parses it using the grammar in `docs/research/registry-url-format.md`.
    4) Service worker calls the local bridge: `GET /resolve?url=<encoded kad: URL>`.
-   5) Bridge performs the DHT GET and returns `{ "redirect": "https://example.com/object.bin" }`.
+   5) Bridge performs the DHT GET, selects an HTTP(S) locator from `provider_urls`, and returns `{ "redirect": "https://example.com/object.bin" }`.
    6) Service worker opens a tab to `https://example.com/object.bin` (Chromium does the actual GET + rendering).
 
 ## URL parser requirements (must match repo grammar)
@@ -169,23 +163,23 @@ Routes from `docs/research/registry-url-format.md`:
 1) `by-hash/<sha256hex>`
 - Extension receives either:
   - `{ matches: [{type:'identity',...},{type:'provider',...}] }`, or
-  - `{ type:'provider', provider_url: ... }`, or
+  - `{ type:'provider', provider_urls: [...], endpoints: [...] }`, or
   - `{ type:'identity', ... }`.
-- If provider exists: navigate to `provider_url`.
+- If provider exists: select a supported HTTP(S) locator from `provider_urls` and navigate only to that locator.
 - If only identity exists: extension cannot render an object because identity does not contain an object URL.
 
 2) `identity/by-name/...` and `identity/by-alias/...`
-- Identity payload does not contain `provider_url` by itself.
+- Identity payload does not contain Provider Record `provider_urls` or endpoints.
 - Extension should present identity info in a UI panel, and/or attempt a second step:
   - if a “primary identity” includes enough information to find a provider (requires v2 behavior not specified here), then resolve provider.
 
 3) `provider/by-hash/<sha256hex>`
-- Extension receives provider record with `provider_url`.
-- Extension navigates to `provider_url`.
+- Extension receives a Provider Record with one or more `provider_urls` plus separate multiaddr `endpoints`.
+- The browser client selects a supported HTTP(S) locator; it must not navigate directly to an unsupported scheme.
 
 4) `provider/by-hash/<sha256hex>/redirect`
-- Extension receives validated redirect target.
-- Extension navigates to that target.
+- The proposed bridge selects a supported HTTP(S) locator from `provider_urls` and returns it as the redirect target.
+- Extension navigates only to that validated HTTP(S) target.
 
 ## Bridge implementation options
 ### Option A: Local HTTP gateway
@@ -197,13 +191,13 @@ Connectivity requirement:
   1) parses the `kad:` URL (multiaddr + context path),
   2) dials the peer identified by the multiaddr,
   3) performs the Kad-DHT GET under the correct namespace key(s), and
-  4) returns a JSON response containing either `provider_url` or a redirect target.
+  4) returns JSON containing the Provider Record with `provider_urls`, or a proposed redirect explicitly selected from supported HTTP(S) locators.
 
 Gateway endpoints (proposed):
 - `GET /resolve?url=<encoded_decent_registry_url>`
   - returns JSON like:
-    - `{ "provider_url": "https://..." }`
-    - or `{ "redirect": "https://..." }`
+    - `{ "provider_urls": ["https://...", "ipfs://..."] }`
+    - or `{ "redirect": "https://..." }` (HTTP(S) selected by the bridge)
     - or `{ "matches": [...] }`
 
 This also allows the gateway to host/contain the Python libp2p DHT logic.
@@ -220,7 +214,7 @@ Important constraints:
 
 Recommended use case:
 - Use native messaging for the DHT resolution step.
-- Still fetch the actual object bytes via HTTP(S) from `provider_url`.
+- Still fetch the actual object bytes using a supported HTTP(S) locator selected from `provider_urls`; other schemes require a separate handler, outside this extension proposal.
 
 ## Security considerations
 - Validate all inputs in bridge:
@@ -228,11 +222,11 @@ Recommended use case:
   - Context path must match known route grammar.
   - Enforce max lengths for any percent-decoded name/alias.
 - Prevent open redirect:
-  - Only follow `provider_url` values validated by `provider_schema` (must start `http://` or `https://`).
+  - Only follow caller-selected HTTP(S) locators from `provider_urls`; generic URI scheme validation alone cannot make a locator safe for browser navigation.
 - Constrain network access:
   - If using local HTTP gateway, scope it to localhost origin and require the extension to call it.
 - Avoid SSRF where applicable:
-  - Treat provider_url strictly as validated HTTP(S) target.
+  - Before a future bridge fetches a provider locator, apply SSRF controls beyond URI validation; never assume a syntactically valid locator is safe to fetch.
 - UX/safety:
   - If identity-only resolution occurs, show info instead of attempting navigation.
 
@@ -253,11 +247,11 @@ References:
 - Native messaging concepts: https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging
 
 ## Implementation plan (testable deliverables)
-1) Create a local bridge (gateway or native host) that resolves each route in `docs/research/registry-url-format.md` and returns provider_url / redirect.
+1) Create a local bridge (gateway or native host) that resolves each route in `docs/research/registry-url-format.md` and returns Provider Records with `provider_urls`; any redirect target must be explicitly selected from supported HTTP(S) locators.
 2) Build an extension prototype:
    - content script intercepts anchor clicks;
    - service worker calls bridge;
-   - on provider_url returns, it opens a tab.
+   - on a Provider Record, selects a supported HTTP(S) locator from `provider_urls` before opening a tab.
 3) Create a test HTML page served from `https://` origin containing links:
    - one `provider/by-hash/<H>`
    - one `provider/by-hash/<H>/redirect`
@@ -272,7 +266,7 @@ References:
 ## Omnibox support (optional but recommended UX)
 To allow users to paste/type the raw scheme URL into Chrome’s address bar and have the extension resolve it, add:
 - `"omnibox": { "keyword": "kad" }` in the extension manifest
-- `chrome.omnibox.onInputEntered` handler that opens a new tab to `provider_url` after resolution.
+- `chrome.omnibox.onInputEntered` handler that opens a new tab only after selecting an HTTP(S) locator from the resolved `provider_urls`.
 
 Source: https://developer.chrome.com/docs/extensions/reference/api/omnibox
 

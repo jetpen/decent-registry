@@ -20,7 +20,7 @@ from decent_registry.multisig_bundle import (
     sign_bundle,
 )
 from decent_registry.provider_schema import (
-    ProviderPayloadV1,
+    ProviderPayloadV3,
     ProviderWithdrawnPayloadV2,
     build_provider_payload_dict,
     build_provider_withdrawal_payload_dict,
@@ -50,9 +50,9 @@ def _legacy_envelope(private_key: Any, *, seq: int, payload: dict[int, Any] | No
     if payload is None:
         payload = build_provider_payload_dict(
             alg="Ed25519",
-            version=1,
+            version=3,
             object_hash=OBJECT_HASH,
-            provider_url=PROVIDER_URL,
+            provider_urls=[PROVIDER_URL],
             endpoints=[ENDPOINT],
         )
     from decent_registry.encoding import encode_signed_update
@@ -79,7 +79,7 @@ def _multisig_provider(
     ]
     bundle = draft_provider_bundle(
         object_hash=OBJECT_HASH,
-        provider_url=url,
+        provider_urls=[url],
         endpoints=[ENDPOINT],
         owner_public_key=keypairs[0].public_key.to_bytes(),
         seq=seq,
@@ -148,17 +148,18 @@ def test_withdrawn_provider_payload_rejects_invalid_shapes(payload):
         decode_provider_payload_dict(payload)
 
 
-def test_existing_provider_v1_payload_remains_unchanged():
+def test_active_v3_payload_has_provider_url_list_wire_shape():
+    urls = ["https://example.com/object.bin", "ipfs://mirror.example/abc"]
     payload = build_provider_payload_dict(
-        alg="Ed25519", version=1, object_hash=OBJECT_HASH,
-        provider_url=PROVIDER_URL, endpoints=[ENDPOINT],
+        alg="Ed25519", version=3, object_hash=OBJECT_HASH,
+        provider_urls=urls, endpoints=[ENDPOINT],
     )
 
     assert cbor2.loads(canonical_cbor(payload)) == {
-        1: "Ed25519", 2: 1, 3: OBJECT_HASH,
-        4: PROVIDER_URL, 5: [ENDPOINT],
+        1: "Ed25519", 2: 3, 3: OBJECT_HASH,
+        4: sorted(urls), 5: [ENDPOINT],
     }
-    assert isinstance(decode_provider_payload_dict(payload), ProviderPayloadV1)
+    assert isinstance(decode_provider_payload_dict(payload), ProviderPayloadV3)
 
 
 def test_legacy_owner_can_withdraw_and_lookup_is_explicit():
@@ -310,7 +311,7 @@ def test_multisignature_withdrawal_binds_current_predecessor_and_rejects_replay(
         )
 
 
-def test_active_v1_update_reactivates_tombstone_and_can_be_withdrawn_again():
+def test_active_v3_update_reactivates_tombstone_and_can_be_withdrawn_again():
     owner = create_new_key_pair()
     active = _legacy_envelope(owner.private_key, seq=1)
     tombstone = _legacy_envelope(
@@ -331,7 +332,7 @@ def test_active_v1_update_reactivates_tombstone_and_can_be_withdrawn_again():
     assert isinstance(
         validator.validate_provider_get(
             record_key=bytes.fromhex(OBJECT_HASH), envelope_cbor=reactivated
-        ), ProviderPayloadV1
+        ), ProviderPayloadV3
     )
     again = _legacy_envelope(
         owner.private_key, seq=4,
