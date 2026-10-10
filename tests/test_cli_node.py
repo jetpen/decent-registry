@@ -4,6 +4,7 @@ import socket
 import subprocess
 import threading
 
+import pytest
 import trio
 
 from decent_registry.dht.libp2p_dht import Libp2pKadDHT
@@ -50,6 +51,68 @@ def _start_libp2p_seed(seed_port: int, alive_seconds: float = 10.0):
     peer_id, listen = ready_q.get(timeout=10)
     bootstrap = f"{listen}/p2p/{peer_id}"
     return t, bootstrap
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "configured_verbosity", "expected_verbosity"),
+    [
+        ([], ["-v"], None, 1),
+        (["-v"], [], None, 1),
+        ([], ["--verbose"], None, 1),
+        (["--verbose"], [], None, 1),
+        ([], ["-vv"], None, 2),
+        ([], ["-v", "-v"], None, 2),
+        ([], ["--verbose", "--verbose"], None, 2),
+        (["-v"], ["-v"], None, 2),
+        ([], [], 2, 2),
+        (["-v"], [], 2, 1),
+        ([], ["-v"], 2, 1),
+        ([], [], None, 0),
+    ],
+    ids=[
+        "after-options",
+        "before-node",
+        "long-after",
+        "long-before",
+        "combined-short",
+        "repeated-short",
+        "repeated-long",
+        "both-positions",
+        "config-retained",
+        "global-overrides-config",
+        "node-overrides-config",
+        "default-warning",
+    ],
+)
+def test_node_cli_verbosity(
+    tmp_path, before, after, configured_verbosity, expected_verbosity
+):
+    config_path = tmp_path / "registry.yaml"
+    if configured_verbosity is not None:
+        config_path.write_text(
+            f"logging:\n  verbosity: {configured_verbosity}\n", encoding="utf-8"
+        )
+    res = _run_cli(
+        before
+        + [
+            "node",
+            "--config",
+            str(config_path),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(_free_port()),
+            "--datastore-path",
+            str(tmp_path / "registry.lmdb"),
+            "--run-seconds",
+            "0.2",
+        ]
+        + after
+    )
+    assert res.returncode == 0, res.stderr
+    assert "[BOOTSTRAP]" in res.stdout
+    assert ("[INFO] Node" in res.stderr) == (expected_verbosity >= 1)
+    assert ("[DEBUG]" in res.stderr) == (expected_verbosity >= 2)
 
 
 def test_node_cli_bootstrap_success_exit_code_zero():
