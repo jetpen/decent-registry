@@ -654,6 +654,14 @@ def main(argv: list[str] | None = None) -> None:
     # node
     node_p = subparsers.add_parser("node", help="Run a DHT node")
     node_p.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        dest="node_verbose",
+        default=None,
+        help="Increase logging verbosity (repeat for DEBUG); combines with global -v",
+    )
+    node_p.add_argument(
         "--config",
         default=str(DEFAULT_SERVER_CONFIG_PATH),
         help="Path to server YAML config file (default: ~/.decent/registry.yaml)",
@@ -914,6 +922,8 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     args = parser.parse_args(argv)
+    if args.cmd == "node" and args.node_verbose is not None:
+        args.verbose = (args.verbose or 0) + args.node_verbose
     _configure_logging(args.verbose)
 
     if args.cmd == "node":
