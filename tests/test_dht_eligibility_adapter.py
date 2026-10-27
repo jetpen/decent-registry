@@ -402,6 +402,79 @@ async def test_routing_table_admission_and_referrals_expire_after_five_minutes()
 
 
 @pytest.mark.trio
+async def test_routing_eligibility_forwards_libp2p_mode_override_keyword():
+    from decent_registry.dht.serving_eligibility import RoutingEligibility
+
+    class Table:
+        def __init__(self):
+            self.peers = set()
+            self.mode_overrides = []
+
+        async def add_peer(self, peer, *, skip_server_mode_check=False):
+            self.mode_overrides.append(skip_server_mode_check)
+            self.peers.add(peer)
+            return True
+
+        def find_local_closest_peers(self, key, count=20):
+            return list(self.peers)[:count]
+
+        def remove_peer(self, peer):
+            self.peers.discard(peer)
+            return True
+
+        def size(self):
+            return len(self.peers)
+
+    table = Table()
+    eligibility = RoutingEligibility(table)
+    unverified_peer = ID.from_pubkey(
+        create_new_key_pair().private_key.get_public_key()
+    )
+    assert await table.add_peer(
+        unverified_peer, skip_server_mode_check=True
+    ) is False
+    assert table.mode_overrides == []
+    assert unverified_peer not in table.peers
+
+    peer = ID.from_pubkey(create_new_key_pair().private_key.get_public_key())
+    await eligibility.record_valid_response(peer)
+    assert table.mode_overrides == [False]
+
+    assert await table.add_peer(peer, skip_server_mode_check=True) is True
+    assert table.mode_overrides == [False, True]
+
+
+@pytest.mark.trio
+async def test_routing_eligibility_preserves_default_add_peer_signature():
+    from decent_registry.dht.serving_eligibility import RoutingEligibility
+
+    class Table:
+        def __init__(self):
+            self.peers = set()
+
+        async def add_peer(self, peer):
+            self.peers.add(peer)
+            return True
+
+        def find_local_closest_peers(self, key, count=20):
+            return list(self.peers)[:count]
+
+        def remove_peer(self, peer):
+            self.peers.discard(peer)
+            return True
+
+        def size(self):
+            return len(self.peers)
+
+    table = Table()
+    eligibility = RoutingEligibility(table)
+    peer = ID.from_pubkey(create_new_key_pair().private_key.get_public_key())
+    await eligibility.record_valid_response(peer)
+
+    assert await table.add_peer(peer) is True
+
+
+@pytest.mark.trio
 async def test_dht_stream_open_timeout_prevents_unbounded_dial(monkeypatch):
     from decent_registry.dht import serving_eligibility
     from decent_registry.dht.serving_eligibility import install_dht_serving_eligibility

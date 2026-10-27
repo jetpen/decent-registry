@@ -1,6 +1,6 @@
 """Bounded Kademlia streams and fresh-serving routing eligibility.
 
-This adapter is intentionally coupled to the pinned py-libp2p 0.7.0 stream
+This adapter is intentionally coupled to the pinned py-libp2p 0.8.1 stream
 framing and routing-table seams. Keep the tests in
 ``tests/test_dht_eligibility_adapter.py`` in sync with dependency changes.
 """
@@ -239,8 +239,9 @@ class BoundedDHTStream:
         length, prefix_size = decoded
         if varint.encode(length) != bytes(self._request[:prefix_size]):
             raise ValueError("non-canonical outbound DHT frame length")
-        # libp2p 0.7.0 also opens a legacy, non-varint PING stream. It is not
-        # evidence of Kademlia serving and remains pass-through only.
+        # Older libp2p routing-table implementations can open a legacy,
+        # non-varint PING stream. It is not evidence of Kademlia serving and
+        # remains pass-through only.
         if length == 0:
             self._tracking = False
             return
@@ -444,10 +445,14 @@ class RoutingEligibility:
             self._remove(peer_id)
         self._expires.clear()
 
-    async def _guarded_add(self, peer: Any) -> bool:
+    async def _guarded_add(
+        self, peer: Any, *, skip_server_mode_check: bool = False
+    ) -> bool:
         peer_id = self._peer_id(peer)
         if not self.is_eligible(peer_id):
             return False
+        if skip_server_mode_check:
+            return await self._add(peer, skip_server_mode_check=True)
         return await self._add(peer)
 
     def _guarded_find(self, key: bytes, count: int = 20) -> list[ID]:
