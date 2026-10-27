@@ -16,6 +16,7 @@ from libp2p.records.validator import Validator
 from libp2p.tools.anyio_service.context import background_trio_service
 from multiaddr import Multiaddr
 
+from decent_registry.dht.serving_eligibility import install_dht_serving_eligibility
 from decent_registry.encoding import (
     OPERATION_GENESIS,
     OPERATION_OWNER_KEY_ROTATION,
@@ -28,9 +29,9 @@ from decent_registry.exceptions import (
     IdentityPublicationExpired,
     IdentityStatePreconditionFailed,
     IdentityStateUnavailable,
+    ProviderAlreadyWithdrawn,
     ProviderStateConflict,
     ProviderStateUnavailable,
-    ProviderAlreadyWithdrawn,
 )
 from decent_registry.provider_schema import (
     ProviderPayloadV3,
@@ -343,6 +344,12 @@ class Libp2pKadDHT:
             enable_random_walk=False,
             strict_validation=False,
         )
+        self._routing_eligibility = install_dht_serving_eligibility(
+            self._host,
+            self._dht,
+            self._dht_mode,
+            on_mode_changed=lambda mode: setattr(self, "_dht_mode", mode),
+        )
         self._dht.register_validator(
             "decent-registry",
             _RegistryDHTValueValidator(self),
@@ -403,6 +410,14 @@ class Libp2pKadDHT:
         await self._host.connect(peer_info)
         if remote_tcp_multiaddr not in self._bootstrap_peers:
             self._bootstrap_peers.append(remote_tcp_multiaddr)
+
+        # A connection/address is not evidence of DHT serving. Perform a bounded
+        # FIND_NODE lookup so the routing gate can observe a complete response.
+        if self._dht is not None:
+            with trio.move_on_after(10):
+                await self._dht.peer_routing.find_closest_peers_network(
+                    self._host.get_id().to_bytes(), count=1
+                )
 
     def _kad_key(self, object_hash: str, *, kind: str = "provider") -> str:
         return f"/decent-registry/{kind}/{object_hash}"
