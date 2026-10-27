@@ -572,7 +572,7 @@ dev = [
 requires-dist = [
     { name = "cbor2", specifier = ">=6.1.0" },
     { name = "cryptography", specifier = ">=46.0.0" },
-    { name = "libp2p", specifier = ">=0.7.0" },
+    { name = "libp2p", specifier = ">=0.8.1" },
     { name = "lmdb", specifier = ">=2.3.0" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pytest-trio", marker = "extra == 'dev'", specifier = ">=0.8" },
@@ -739,7 +739,7 @@ wheels = [
 
 [[package]]
 name = "libp2p"
-version = "0.7.0"
+version = "0.8.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aioquic" },
@@ -755,6 +755,7 @@ dependencies = [
     { name = "multiaddr" },
     { name = "mypy-protobuf" },
     { name = "noiseprotocol" },
+    { name = "prometheus-client" },
     { name = "protobuf" },
     { name = "py-cid" },
     { name = "py-multibase" },
@@ -770,9 +771,9 @@ dependencies = [
     { name = "types-requests" },
     { name = "zeroconf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c4/a2/f16c5d2dc5bfb5413f4cb734f0da0d1f14af0614832aa7091f54c35031e4/libp2p-0.7.0.tar.gz", hash = "sha256:143923498adbd05d55546d59c522b297dd914035f2dd30a3df682096bef4ba00", size = 2130362, upload-time = "2026-07-09T17:35:28.862Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/55/07/7da82f3cf3705278c583a5353a1235875ea886324ee7d3cd94ebd4404e56/libp2p-0.8.1.tar.gz", hash = "sha256:3fb1493d215d10205f56095014e21c3d4eec025a9becb3e73a768d1151f27fd0", size = 36281043, upload-time = "2026-10-22T19:48:27.887Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/26/52/0f964cc80f7a45b74207974c1ae013dcfd435967f7a437e160ab4fbffed5/libp2p-0.7.0-py3-none-any.whl", hash = "sha256:3989d2dc3432c478833eb6aaa0d2a18627e08e56164644fdf0739af258bf39c4", size = 1085260, upload-time = "2026-07-09T17:35:26.863Z" },
+    { url = "https://files.pythonhosted.org/packages/bc/c0/bc99a6cfb57965313649c3d6f899fa00e51f6b05fb3418459a052d7392b2/libp2p-0.8.1-py3-none-any.whl", hash = "sha256:3d53daa20a6a78984c9b4ed1654d771757b187282f90376d7156c2b67828b308", size = 1317217, upload-time = "2026-10-22T19:48:23.894Z" },
 ]
 
 [[package]]
@@ -1149,6 +1150,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe6ef3fa267035b518369d9511ffab804f839851d2779/pluggy-1.6.0.tar.gz", hash = "sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3", size = 69412, upload-time = "2025-05-15T12:30:07.975Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746", size = 20538, upload-time = "2025-05-15T12:30:06.134Z" },
+]
+
+[[package]]
+name = "prometheus-client"
+version = "0.26.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/52/73/f1334c29c2af4cd9dba6c7817e61b611bd0215e2eb5565c6064a4de18802/prometheus_client-0.26.0.tar.gz", hash = "sha256:04a91bcf94e2cf74a44a1a874d651a2e853ed354b6e822f3b7487751465d5c2b", size = 92910, upload-time = "2026-07-24T19:36:41.893Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/eb/a3/b69efbf4143b5b9859b977770bbbabcc2796b702fa69dc40271e45cd5a56/prometheus_client-0.26.0-py3-none-any.whl", hash = "sha256:fa93d06737aa02bacd05794768508bb97d2fbee28cb3bca04eaae92f0ca953d6", size = 64494, upload-time = "2026-07-24T19:36:40.854Z" },
 ]
 
 [[package]]

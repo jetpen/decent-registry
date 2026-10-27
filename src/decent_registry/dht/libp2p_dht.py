@@ -1109,45 +1109,44 @@ class Libp2pKadDHT:
             bootstrap_peers = tuple(self._bootstrap_peers)
             if not bootstrap_peers:
                 return None
-            try:
-                async with Libp2pKadDHT(
-                    listen="/ip4/127.0.0.1/tcp/0",
-                    durable_store=None,
-                    dht_mode=DHTMode.CLIENT,
-                ) as remote_dht:
-                    kad_key = remote_dht._kad_key(
-                        canonical_object_key_hex, kind="identity"
-                    )
-                    envelope = None
-                    local_host = getattr(self, "_host", None)
-                    local_peer_id = (
-                        None if local_host is None else local_host.get_id()
-                    )
-                    for peer in bootstrap_peers:
-                        try:
-                            peer_info = info_from_p2p_addr(Multiaddr(peer))
-                            if (
-                                local_peer_id is not None
-                                and peer_info.peer_id == local_peer_id
-                            ):
-                                continue
-                            await remote_dht.bootstrap(peer)
-                            record = await remote_dht.dht.value_store._get_from_peer(
-                                peer_info.peer_id,
-                                kad_key.encode("utf-8"),
-                                return_record=True,
-                            )
-                        except Exception:
-                            continue
-                        if record is None:
-                            continue
-                        candidate = getattr(record, "value", None)
-                        if not isinstance(candidate, (bytes, bytearray)):
-                            continue
-                        envelope = bytes(candidate)
-                        break
-            except Exception:
-                return None
+            envelope = None
+            local_host = getattr(self, "_host", None)
+            local_peer_id = None if local_host is None else local_host.get_id()
+            for peer in bootstrap_peers:
+                try:
+                    peer_info = info_from_p2p_addr(Multiaddr(peer))
+                    if (
+                        local_peer_id is not None
+                        and peer_info.peer_id == local_peer_id
+                    ):
+                        continue
+                    # Isolate each direct peer attempt. A failed address can leave
+                    # connection state behind for that PeerID; a fresh reader per
+                    # configured endpoint ensures the next endpoint is attempted
+                    # independently, including alternate addresses for one peer.
+                    async with Libp2pKadDHT(
+                        listen="/ip4/127.0.0.1/tcp/0",
+                        durable_store=None,
+                        dht_mode=DHTMode.CLIENT,
+                    ) as remote_dht:
+                        kad_key = remote_dht._kad_key(
+                            canonical_object_key_hex, kind="identity"
+                        )
+                        await remote_dht.bootstrap(peer)
+                        record = await remote_dht.dht.value_store._get_from_peer(
+                            peer_info.peer_id,
+                            kad_key.encode("utf-8"),
+                            return_record=True,
+                        )
+                except Exception:
+                    continue
+                if record is None:
+                    continue
+                candidate = getattr(record, "value", None)
+                if not isinstance(candidate, (bytes, bytearray)):
+                    continue
+                envelope = bytes(candidate)
+                break
 
         if envelope is None:
             return None
